@@ -52,8 +52,8 @@ More detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 ## Known limitations
 
 - Up to 11 players per server.
-- Every player is shown as session leader (crown).
-- Car-to-car collisions are not sent between players yet.
+- The crown next to every gamertag is the game's VIP badge (Extra Options `OfflineVIP=1`), not the session
+  leader. The leader has the star icon in the player list.
 - Liveries of others show once they were saved online in the paint shop.
 - Joining from the list starts free roam on the mainland (not Storm Island).
 

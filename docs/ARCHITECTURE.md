@@ -44,8 +44,10 @@ cars). Horizon Connect answers all of that on the players' own PCs.
   allocation) and Forza's LSP services. The LSP message formats are read from the player's game executable with
   `pefile` (`xls.py`), so nothing of the game is copied into this project.
 - `relay.py` – the NerdCore relay (formats in `nerd.py`): answers each console's connection, owns the lobby's
-  SessionHost object, forwards every object and car update to the other players and replays the history to
-  players who join later. It also answers `FH2O?` with `FH2O!{"players": n, "max": m}` for the server list.
+  SessionHost object (an invite-only session), forwards every object, car update, collision and repair to the
+  other players (numbering object updates per receiver) and replays the history to players who join later. It
+  chooses the session leader - the host when they join, else whoever has been in the session longest - and sets
+  it in each player's PlayerData (`IsLeader`). It also answers `FH2O?` with `FH2O!{"players": n, "max": m}` for the server list.
 - `run_server.py` – starts `fh2srv.py` and keeps its output in `logs\`.
 
 ## Settings
