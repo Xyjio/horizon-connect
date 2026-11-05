@@ -5,8 +5,8 @@ Microsoft servers that were shut down.
 
 Horizon Connect is a mod for **Azimuth** with
 [Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions). One player hosts, the others join.
-The programm tunnels through [playit.gg](https://playit.gg) so you dont have to portforward.
-Everything needed isinside the mod folder, nothing else has to be installed.
+It tunnels through [playit.gg](https://playit.gg), so you don't have to forward any ports.
+Everything needed is inside the mod folder; nothing else has to be installed.
 
 > 🚧 **Work in progress:** what's being worked on and what comes next → [ROADMAP.md](ROADMAP.md)
 
@@ -18,7 +18,7 @@ Everything needed isinside the mod folder, nothing else has to be installed.
   - **Host a server** – set up once, then *Start the server and join* with one button
 - **Hosting over the internet** without port forwarding: the built-in playit.gg agent makes a tunnel; your
   address stays the same, so friends only have to add it once.
-- **Joining starts the game's own *Private Free Roam Online***
+- **Joining starts the game's own *Private Free Roam Online*** – no menu digging.
 - **Every player gets their own player id** automatically (and keeps their save).
 - German and English menu texts (follows the game's language).
 
@@ -33,13 +33,12 @@ This repository contains **no game files**. You need your own copy of the game.
 ## Install
 
 1. Download `Horizon-Connect-1.0.1.zip` from the [Releases](../../releases) page.
-2.  Unzip it and copy the folder `Horizon Connect` into `<Azimuth folder>\mods\`.
+2. Unzip it and copy the folder `Horizon Connect` into `<Azimuth folder>\mods\`.
 3. Start the game. If Windows Firewall asks about `python` or `playitd`, allow it.
 
 Full guide: [`docs/INSTALL.md`](docs/INSTALL.md)
 
 ## How it works
-
 
 - **`plugin/`** – `HorizonConnect.dll`, an Extra Options plugin. It hooks the game's network imports and a few of
   Azimuth's WinRT answers so the game's Xbox Live calls get usable answers, starts the local server and the
@@ -49,7 +48,6 @@ Full guide: [`docs/INSTALL.md`](docs/INSTALL.md)
   are read from the game's own executable at start, so nothing of the game is copied here.
 
 More detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-
 
 ## Known limitations
 

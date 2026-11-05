@@ -6,7 +6,7 @@ gets 503.
 
   py -3 -I fh2srv.py --game <FH2 game folder> [--host 0.0.0.0] [--port 8090] [--out <folder>]
 """
-import argparse, datetime, hashlib, http.server, json, os, random, struct, sys, threading, time, uuid
+import argparse, datetime, hashlib, http.server, json, os, random, struct, sys, threading, uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import relay, xls
@@ -339,7 +339,7 @@ def mpsd_sessions(method, path, body, xuid=DEFAULT_XUID, gamertag='Player 1'):
         return 200, {'results': []}
     if '/sessions/' not in p: return 503, None
     # ISO 8601 with milliseconds, as the session directory wrote them (6-digit fractions are rejected)
-    now = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+    now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
     with MPSD_LOCK:
         doc = MPSD.get(p)
         if method == 'GET':

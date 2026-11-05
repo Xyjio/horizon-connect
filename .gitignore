@@ -1,0 +1,22 @@
+# build output
+build/
+dist/
+downloads/
+*.dll
+*.exe
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+
+# what the server writes while it runs
+server/captures/
+server/logs/
+server/data/
+*.log
+*.jsonl
+
+# local settings and secrets
+playit-secret.txt
+*.secret
