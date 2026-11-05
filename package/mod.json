@@ -3,7 +3,7 @@
   "id": "horizon-connect",
   "name": "Horizon Connect",
   "author": "Horizon Connect; based on FH2Net by conner-mcvay (MIT) and the native menu technique of Extra Options / EO Weather Control (GPL-3)",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Online free roam with your friends: built-in server, hosting through playit.gg, server list in the pause menu (F12).",
   "dependencies": [],
   "media": "plugins/HorizonConnect/Media"
