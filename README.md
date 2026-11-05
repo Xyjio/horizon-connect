@@ -53,6 +53,7 @@ More detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 - Up to 11 players per server.
 - Every player is shown as session leader (crown).
+- Car-to-car collisions are not sent between players yet.
 - Liveries of others show once they were saved online in the paint shop.
 - Joining from the list starts free roam on the mainland (not Storm Island).
 
