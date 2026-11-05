@@ -30,10 +30,6 @@ Found a bug or have a wish? Open an [issue](../../issues).
 ## ✅ Done
 
 ### 1.0.1
-- The menu opens with **F12** (was F6, which is the Azimuth Mapper's mouse pointer hotkey and took gas and brake
-  away); another key can be set with `[menu] Key=`.
-
-### 1.0.0
 - In-game server list in the pause menu: add, edit, delete, status and player count of each server.
 - Hosting over the internet with the built-in playit.gg agent (set up once, then start with one button).
 - Joining starts the game's own *Private Free Roam Online*.
