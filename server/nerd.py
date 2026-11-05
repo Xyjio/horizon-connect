@@ -219,9 +219,46 @@ def server_update(router, id, seq, payload):
 # 7 AvailableArbitration, 8 MatchTicketArbiter. Bools are 1 bit; 1, 2 and 4 are the server's (SyncedBool<0,1>).
 CONSOLE_SESSION_ENTRY_FINALISED = 1
 
+# PlayerData (router 1; NerdLib, constructor 1417F3250): the player's own object, one per console. Its vars in
+# order: 0 BufChoices, 1 HasLivery, 2 IsNewLivery, 3 NetworkName, 4 XUID, 5 IsLeader, 6 NumReceivedKickVotes,
+# 7 HasFinalScore, 8.. race points and the vars of its sub-objects - more than 16 in all, so its var index is
+# 8 bits wide (captures: a create starts with index 3, a 5-bit length and the gamertag in 16-bit chars, then
+# index 4 and the 64-bit XUID). IsLeader is a SyncedBool<0,1>, the server's: consoles never send it, and the
+# game reads the crown (session leader) from it alone - the local player's (NetworkIsLocalPlayerLeader,
+# 1408C8490) and the others' (NetworkIsAnyRemotePlayerLeader, 1408C8200).
+PLAYER_ROUTER = 1
+PLAYER_INDEX_BITS = 8
+PLAYER_IS_LEADER = 5
+
 
 def bool_var(index, value, index_bits=4):
     return BitWriter().bits(index, index_bits).bits(1 if value else 0, 1)
+
+
+# MsgCarCollision (21; send 141804D30, receive 141804E20): the car's handle (7-bit id), a vector (3 floats,
+# 14181FFA0) and 3 floats - 192 bits after the handle. Sent unsequenced, next to the car's CarPredictionFull.
+COLLISION_BODY_BITS = 192
+
+
+def read_collision(r):
+    h = read_handle(r, 7)
+    body = BitWriter()
+    for _ in range(COLLISION_BODY_BITS):
+        body.bits(r.bits(1), 1)
+    return h, body
+
+
+def collision_msg(h, body):
+    w = BitWriter().bits(21, 7).bits(h['a'], 1).bits(h['b'], 1).bits(h['id'], 7)
+    if h['b'] and not h['a']:
+        w.bits(h['peer'], 8)
+    return concat(w, body)
+
+
+# RequestLeaderChange (59; 1418159B0): the handle (7-bit id) of the player to make leader. DropLeadership (60;
+# 1417F7A50): no fields. Both are a console's requests to the server.
+def read_leader_change(r):
+    return read_handle(r, 7)
 
 
 def concat(*msgs):

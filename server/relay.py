@@ -8,7 +8,18 @@ Objects: the server owns one object itself, the lobby's SessionHost (router 6, t
 before they finish joining (stateflow network_matchmaking.xml wait_for_session_host). Every object a console
 creates or updates is forwarded to the other consoles with its handle marked as that console's (the relay
 handle: peer index), and kept in a history that is replayed in order to consoles that join later. A console's
-car (CarPredictionFull, ~30 a second, unsequenced) is forwarded the same way but not kept.
+car (CarPredictionFull, ~30 a second, unsequenced) is forwarded the same way but not kept, and so are its
+collisions (MsgCarCollision), whose car handle is turned into what it means to each receiver.
+
+Object updates are numbered per receiver (each object's link takes them strictly in order, seq + 1 mod 255), so
+the relay can add updates of its own to a console's object: a console's updates are put back in order if they
+arrive out of it, and every receiver gets them numbered from the create it was sent.
+
+Session leader (the crown): the server's var IsLeader on each console's PlayerData (router 1). One console is
+the leader - the host's (--leader-xuid, the player id of the PC the server runs on) when it joins, otherwise the
+console that has been in the session longest; it passes on when the leader leaves, asks for another one
+(RequestLeaderChange) or gives it up (DropLeadership). Each console gets IsLeader on its own PlayerData as a
+server update and on everyone else's PlayerData as a relayed update.
 
 Testing alone (fh2srv --mirror <seconds>): each console also gets its own objects back as another player's
 (peer 250), and its car that many seconds late - a ghost of itself to show that car sync works.
@@ -28,11 +39,11 @@ NAMES = {0: 'OpenConnection', 1: 'OpenConnectionResponse', 2: 'CloseConnection',
          10: 'ObjectRequestOwnership', 11: 'ObjectGrantOwnership', 12: 'ObjectTransferOwnership',
          13: 'ObjectNeedsUpdates', 14: 'PlayerInput', 15: 'CarPredictionFull', 20: 'MsgBreakGlass', 21: 'MsgCarCollision',
          22: 'MsgCollObjPos', 23: 'MsgCollObjRest', 24: 'MsgCollObjDetachPart', 25: 'MsgCollObjPosVel', 34: 'FinaliseSessionEntry',
+         59: 'RequestLeaderChange', 60: 'DropLeadership',
          35: 'MsgRepairDamage', 71: 'ServerTrafficMessage', 72: 'ClientTrafficMessage'}
 OWN_ATTEMPT = 1
 SESSION_HOST = (6, 0)        # router, object id of the server's SessionHost
 QUIET_DROP_S = 15
-COLLISION_BITS = 201          # MsgCarCollision's size after its 7-bit id
 MAX_PLAYERS = 12             # FH2's session size (gameServerPlatform maxAllowedPlayers)
 # Peer indexes stay small and are reused: the game keeps per-peer state in a fixed-size table indexed by
 # the 8-bit peer index of a relay handle, so a large index reads past it (crash at game+F842E5 with
@@ -42,8 +53,8 @@ MIRROR_INDEX = MAX_PLAYERS - 1 # the peer index of the mirror's ghost player
 
 
 class Peer:
-    def __init__(self, addr, index):
-        self.addr, self.index = addr, index
+    def __init__(self, addr, index, joined):
+        self.addr, self.index, self.joined = addr, index, joined
         self.acks = nerd.Acks()
         self.seq = itertools.count(1)        # our sequenced packet ids to this peer
         self.synced = False
@@ -51,16 +62,22 @@ class Peer:
         self.user = None
         self.finalised = False               # SessionEntryFinalised sent
         self.console_id = None               # its ConsoleSynced object (router 3)
+        self.player_id = None                # its PlayerData object (router 1)
         self.server_seq = {}                 # (router, id) -> last server-update seq sent
         self.objects = {}                    # (router, id) -> last seq: what it owns
+        self.out_seq = {}                    # (owner index, router, id) -> last seq of that object sent to this peer
+        self.leader_shown = {}               # owner index -> IsLeader last sent to this peer for that PlayerData
+        self.own_leader = None               # IsLeader last sent for its own PlayerData
         self.last_seen = time.monotonic()
         self.cars = 0
+        self.collisions = 0
 
 
 class Relay:
-    def __init__(self, out_dir, lock, port=5101, host='::', mirror=None):
+    def __init__(self, out_dir, lock, port=5101, host='::', mirror=None, leader_xuid=None):
         self.out_dir, self.lock = out_dir, lock
         self.mirror = mirror                 # seconds: each console also gets itself back as a ghost player
+        self.leader_xuid = leader_xuid       # the host's player id: its console takes the crown when it joins
         self.delayed = []                    # (due, peer, msgs) for the mirror's cars
         self.sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)   # IPv4 consoles too (as ::ffff:a.b.c.d)
@@ -68,11 +85,14 @@ class Relay:
         self.mu = threading.RLock()
         self.t0 = time.monotonic()
         self.peers = {}
+        self.joins = itertools.count()
         self.free = list(range(1, MAX_PLAYERS - (1 if mirror is not None else 0)))   # unused peer indexes
-        self.history = []                    # (owner index, msg id, object dict) in arrival order
+        self.history = []                    # (owner index, msg id, object dict) in order
+        self.streams = {}                    # (owner, router, id) -> {'next': seq, 'pending': {seq: (msg, o)}}
         self.seen = set()                    # (owner, msg, router, id, seq): consoles resend unacked messages
+        self.leader = None                   # peer index of the session leader
         self.n = 0
-        print(f'fh2srv game UDP (relay) on [{host}]:{port}', flush=True)
+        print(f'fh2srv game UDP (relay) on [{host}]:{port}' + (f', leader: player {leader_xuid} when present' if leader_xuid else ''), flush=True)
 
     def now(self):
         return int((time.monotonic() - self.t0) * 1000) + 1
@@ -87,14 +107,49 @@ class Relay:
             pass
         return data
 
+    def send_all(self, peer, msgs, sequenced=True):
+        for i in range(0, len(msgs), 8):     # a few messages per packet, well under the packet size limit
+            self.send(peer, msgs[i:i + 8], sequenced=sequenced)
+
     def others(self, peer):
         return [p for p in self.peers.values() if p is not peer and p.synced]
 
-    def forward(self, owner, msgs, sequenced=True):
-        """Messages from `owner` to every other synced peer."""
-        for p in self.others(owner):
-            for i in range(0, len(msgs), 8):
-                self.send(p, msgs[i:i + 8], sequenced=sequenced)
+    # ---- objects ------------------------------------------------------------------------------------------------
+
+    def relayed(self, to, owner, msg, router, id, payload, type=0, create_seq=0):
+        """`owner`'s object as an ObjectCreate/ObjectUpdate for `to`, numbered in `to`'s own sequence of it."""
+        key = (owner, router, id)
+        if msg == 7 or key not in to.out_seq:
+            seq = create_seq if msg == 7 else 0
+        else:
+            seq = (to.out_seq[key] + 1) % 255
+        to.out_seq[key] = seq
+        return nerd.object_msg(msg, router, id, seq, payload, peer=owner, type=type)
+
+    def in_order(self, peer, msg, o):
+        """A console's object messages in its own order: (msg, o) pairs ready to pass on."""
+        key = (peer.index, o['router'], o['id'])
+        st = self.streams.get(key)
+        if msg == 7:
+            st = self.streams[key] = {'next': (o['seq'] + 1) % 255, 'pending': {}}
+            return [(msg, o)]
+        if st is None:                       # an update to an object we never saw made: pass it on as it is
+            return [(msg, o)]
+        if o['seq'] != st['next']:
+            if (o['seq'] - st['next']) % 255 < 128:
+                st['pending'][o['seq']] = (msg, o)
+                if len(st['pending']) <= 64:
+                    return []
+                st['next'] = min(st['pending'], key=lambda q: (q - st['next']) % 255)   # give up waiting
+            else:
+                return []                    # older than what was passed on already
+        else:
+            st['pending'][o['seq']] = (msg, o)
+        ready = []
+        while st['next'] in st['pending']:
+            ready.append(st['pending'].pop(st['next']))
+            st['next'] = (st['next'] + 1) % 255
+        return ready
 
     def drop(self, peer, why):
         """Forget a console: its objects go from the history, and the others delete them."""
@@ -103,22 +158,90 @@ class Relay:
             self.free.append(peer.index); self.free.sort()
         self.history = [h for h in self.history if h[0] != peer.index]
         self.seen = {k for k in self.seen if k[0] != peer.index}
-        deletes = [nerd.object_delete(router, id, seq + 1, peer=peer.index) for (router, id), seq in peer.objects.items()]
-        if deletes:
-            for p in self.peers.values():
-                if p.synced:
-                    for i in range(0, len(deletes), 8):
-                        self.send(p, deletes[i:i + 8], sequenced=True)
+        self.streams = {k: v for k, v in self.streams.items() if k[0] != peer.index}
+        n = 0
+        for p in self.peers.values():
+            mine = [k for k in p.out_seq if k[0] == peer.index]
+            deletes = [nerd.object_delete(router, id, (p.out_seq.pop((o, router, id)) + 1) % 255, peer=peer.index) for o, router, id in mine]
+            p.leader_shown.pop(peer.index, None)
+            if deletes and p.synced:
+                self.send_all(p, deletes)
+            n = max(n, len(deletes))
         print(f'{time.strftime("%H:%M:%S")} peer {peer.index} [{peer.addr[0]}]:{peer.addr[1]} dropped ({why}); '
-              f'{len(deletes)} objects deleted for the others', flush=True)
+              f'{n} objects deleted for the others', flush=True)
+        if peer.index == self.leader:
+            self.leader = None
+        self.update_leader()
 
-    def set_console_var(self, peer, index, value):
-        """A server update of one of the server's bools on the peer's own ConsoleSynced object."""
+    def server_var(self, peer, router, id, payload):
+        """A server update of server vars on one of the peer's own objects."""
         # The receiver takes updates strictly in order (link seq + 1, mod 255; 1417B1E70) and the first one
         # it expects from us is 0; later ones wait for the gap to fill.
-        key = (3, peer.console_id)
+        key = (router, id)
         seq = peer.server_seq[key] = (peer.server_seq.get(key, -1) + 1) % 255
-        return nerd.server_update(3, peer.console_id, seq, nerd.bool_var(index, value))
+        return nerd.server_update(router, id, seq, payload)
+
+    def set_console_var(self, peer, index, value):
+        """One of the server's bools on the peer's own ConsoleSynced object."""
+        return self.server_var(peer, 3, peer.console_id, nerd.bool_var(index, value))
+
+    # ---- the session leader (crown) -----------------------------------------------------------------------------
+
+    def leader_var(self, value):
+        return nerd.bool_var(nerd.PLAYER_IS_LEADER, value, nerd.PLAYER_INDEX_BITS)
+
+    def update_leader(self, prefer=None):
+        """Choose the leader if there is none (or `prefer`, the host's console that just joined), then tell
+        every console what changed."""
+        cands = [p for p in self.peers.values() if p.synced and p.player_id is not None]
+        by_index = {p.index: p for p in cands}
+        new = self.leader if self.leader in by_index else None
+        if prefer is not None and prefer.index in by_index:
+            new = prefer.index
+        if new is None and cands:
+            new = min(cands, key=lambda p: p.joined).index
+        if new != self.leader:
+            who = by_index[new] if new is not None else None
+            print(f'{time.strftime("%H:%M:%S")} session leader: ' +
+                  (f'peer {new} (player {who.user})' if who else 'none'), flush=True)
+            self.leader = new
+        for to in self.peers.values():
+            if to.synced:
+                self.show_leader(to)
+
+    def show_leader(self, to):
+        """IsLeader for every PlayerData `to` has (its own and the others'), where it isn't what `to` knows."""
+        msgs = []
+        if to.player_id is not None and to.own_leader != (to.index == self.leader):
+            to.own_leader = to.index == self.leader
+            msgs.append(self.server_var(to, nerd.PLAYER_ROUTER, to.player_id, self.leader_var(to.own_leader)))
+        for p in self.peers.values():
+            if p is to or p.player_id is None or (p.index, nerd.PLAYER_ROUTER, p.player_id) not in to.out_seq:
+                continue
+            value = p.index == self.leader
+            if to.leader_shown.get(p.index) != value:
+                to.leader_shown[p.index] = value
+                msgs.append(self.relayed(to, p.index, 8, nerd.PLAYER_ROUTER, p.player_id, self.leader_var(value)))
+        if msgs:
+            self.send_all(to, msgs)
+
+    def leader_request(self, peer, target):
+        """RequestLeaderChange / DropLeadership from `peer`: only the leader can pass the crown on."""
+        if peer.index != self.leader:
+            return f'(not the leader: ignored)'
+        cands = [p for p in self.peers.values() if p.synced and p.player_id is not None and p is not peer]
+        if target is None:                   # DropLeadership: to the console in the session longest
+            if not cands:
+                return '(nobody else to take it)'
+            target = min(cands, key=lambda p: p.joined).index
+        if target not in [p.index for p in cands] + [peer.index]:
+            return f'(no player {target})'
+        self.leader = target
+        print(f'{time.strftime("%H:%M:%S")} session leader: peer {target} (passed on by peer {peer.index})', flush=True)
+        self.update_leader()
+        return f'-> leader peer {target}'
+
+    # ---- the handshake and packets ------------------------------------------------------------------------------
 
     def on_synced(self, peer):
         """The peer finished the handshake: TimeSync and ConnectionSyncDone, then the server's objects and
@@ -127,10 +250,22 @@ class Relay:
         peer.sync_index += 1
         world = [nerd.object_msg(7, SESSION_HOST[0], SESSION_HOST[1], 0, type=0)]
         for owner, msg, o in self.history:
-            world.append(nerd.object_msg(msg, o['router'], o['id'], o['seq'], o['payload'], peer=owner, type=o.get('type', 0)))
-        for i in range(0, len(world), 8):    # a few messages per packet, well under the packet size limit
-            self.send(peer, world[i:i + 8], sequenced=True)
+            world.append(self.relayed(peer, owner, msg, o['router'], o['id'], o['payload'], o.get('type', 0), o['seq']))
+        self.send_all(peer, world)
+        self.show_leader(peer)
         return len(world)
+
+    def handle_for(self, h, owner, to):
+        """A car handle from `owner`, as `to` knows that car (None: a car `to` doesn't have)."""
+        if h['a']:
+            return h
+        if not h['b']:                       # the owner's own car
+            return dict(h, b=1, peer=owner.index)
+        if h['peer'] == to.index:            # the receiver's own car
+            return dict(h, b=0)
+        if not any(p.index == h['peer'] for p in self.peers.values()):
+            return None
+        return h
 
     def handle(self, data, addr):
         p = nerd.parse(data)
@@ -146,9 +281,10 @@ class Relay:
             if not self.free:
                 print(f'{time.strftime("%H:%M:%S")} [{addr[0]}]:{addr[1]} refused: the session is full', flush=True)
                 return ['refused: the session is full'], None
-            peer = self.peers[addr] = Peer(addr, self.free.pop(0))
+            peer = self.peers[addr] = Peer(addr, self.free.pop(0), next(self.joins))
         peer.last_seen = time.monotonic()
-        out, notes, fwd, out_seq, cars, mirror_objs = [], [], [], [], [], []
+        out, notes, ready, out_seq, unseq, mirror_objs = [], [], [], [], [], []
+        new_player = False
         peer.acks.add(hdr['id'])
         notes.append(f'peer {peer.index} id {hdr["id"]} cnt {hdr["count"]}')
         for _ in range(hdr['count']):
@@ -191,23 +327,29 @@ class Relay:
                 self.seen.add(key)
                 if msg == 7 and o['router'] == 3:
                     peer.console_id = o['id']
+                if msg == 7 and o['router'] == nerd.PLAYER_ROUTER:
+                    peer.player_id, peer.own_leader, new_player = o['id'], None, True
+                    for q in self.peers.values():
+                        q.leader_shown.pop(peer.index, None)
                 peer.objects[(o['router'], o['id'])] = o['seq']
-                self.history.append((peer.index, msg, o))
-                fwd.append(nerd.object_msg(msg, o['router'], o['id'], o['seq'], o['payload'], peer=peer.index, type=o.get('type', 0)))
-                mirror_objs.append((msg, o))
+                for m, ro in self.in_order(peer, msg, o):
+                    self.history.append((peer.index, m, ro))
+                    ready.append((m, ro))
+                    mirror_objs.append((m, ro))
             elif msg == 15:
                 h, body = nerd.read_car(r)
-                cars.append(nerd.car_msg(h['id'], body, peer=peer.index))
+                unseq.append(('car', h, body))
                 if self.mirror is not None:
                     self.delayed.append((time.monotonic() + self.mirror, peer, nerd.car_msg(h['id'], body, peer=MIRROR_INDEX)))
                 peer.cars += 1
                 notes.append(name)
             elif msg == 21:
-                # MsgCarCollision: a fixed 201 bits (all 1251 captured 2026-11-04 are followed by a well-formed
-                # CarPredictionFull exactly there). Read past it and drop it: before, the relay stopped at it and
-                # lost the car update behind it in the same packet, so other cars jumped while one was touching
-                # something. Forwarding collisions to the other consoles is left for later.
-                r.bits(COLLISION_BITS)
+                # MsgCarCollision: the car's handle, then 192 bits (all 1251 captured 2026-11-04 are followed by a
+                # well-formed CarPredictionFull exactly there). Passed on like the car, its handle as each
+                # receiver knows that car.
+                h, body = nerd.read_collision(r)
+                unseq.append(('collision', h, body))
+                peer.collisions += 1
                 notes.append(name)
             elif msg == 34:                  # no fields: the console has loaded the session's resources
                 notes.append(name)
@@ -215,18 +357,35 @@ class Relay:
                     peer.finalised = True
                     out_seq.append(self.set_console_var(peer, nerd.CONSOLE_SESSION_ENTRY_FINALISED, True))
                     notes.append('-> SessionEntryFinalised')
+            elif msg == 59:
+                h = nerd.read_leader_change(r)
+                target = peer.index if not h['b'] else h.get('peer')
+                notes.append(f'{name} {target} ' + self.leader_request(peer, target))
+            elif msg == 60:
+                notes.append(f'{name} ' + self.leader_request(peer, None))
             else:
                 notes.append(f'{name} (+{r.left()} bits, not read)')
                 break
-        if fwd:
-            self.forward(peer, fwd)
+        if ready:
+            for p in self.others(peer):
+                self.send_all(p, [self.relayed(p, peer.index, m, o['router'], o['id'], o['payload'], o.get('type', 0), o['seq'])
+                                  for m, o in ready])
             if self.mirror is not None:      # the console's own objects, back to it as the ghost's
-                ghost = [nerd.object_msg(m, o['router'], o['id'], o['seq'], o['payload'], peer=MIRROR_INDEX, type=o.get('type', 0))
-                         for m, o in mirror_objs]
-                for i in range(0, len(ghost), 8):
-                    self.send(peer, ghost[i:i + 8], sequenced=True)
-        if cars:
-            self.forward(peer, cars, sequenced=False)
+                self.send_all(peer, [nerd.object_msg(m, o['router'], o['id'], o['seq'], o['payload'], peer=MIRROR_INDEX, type=o.get('type', 0))
+                                     for m, o in mirror_objs])
+        if new_player:                       # after its create went out: the others can be told its IsLeader
+            self.update_leader(prefer=peer if self.leader_xuid and peer.user == self.leader_xuid else None)
+        if unseq:
+            for p in self.others(peer):
+                msgs = []
+                for kind, h, body in unseq:
+                    if kind == 'car':
+                        msgs.append(nerd.car_msg(h['id'], body, peer=peer.index))
+                    else:
+                        th = self.handle_for(h, peer, p)
+                        if th is not None:
+                            msgs.append(nerd.collision_msg(th, body))
+                self.send_all(p, msgs, sequenced=False)
         if out_seq:
             self.send(peer, out_seq, sequenced=True)
         reply = None
@@ -254,10 +413,11 @@ class Relay:
             rec = {'n': self.n, 'time': time.time(), 'from': f'[{addr[0]}]:{addr[1]}', 'hex': data.hex(), 'what': ' | '.join(notes)}
             if reply:
                 rec['reply'] = reply.hex()
-            if notes[1:] != ['CarPredictionFull']:   # the cars would fill the log; they are counted instead
+            routine = all(x in ('CarPredictionFull', 'MsgCarCollision') for x in notes[1:])
+            if not routine:                  # the cars would fill the log; they are counted instead
                 with self.lock, open(os.path.join(self.out_dir, 'udp.jsonl'), 'a', encoding='utf-8') as f:
                     f.write(json.dumps(rec) + '\n')
-            quiet = all(x in ('Ping', 'Pong', 'CarPredictionFull') or x.startswith('peer ') for x in notes) and self.n > 30
+            quiet = all(x in ('Ping', 'Pong', 'CarPredictionFull', 'MsgCarCollision') or x.startswith('peer ') for x in notes) and self.n > 30
             if not quiet or self.n % 500 == 0:
                 print(f'{time.strftime("%H:%M:%S")} udp #{self.n} [{addr[0]}]:{addr[1]} {len(data)} bytes: {rec["what"]}', flush=True)
 
@@ -285,8 +445,8 @@ class Relay:
                         self.send(p, [nerd.ping(self.now())])
 
 
-def start(out_dir, lock, port=5101, host='::', mirror=None):
-    relay = Relay(out_dir, lock, port, host, mirror)
+def start(out_dir, lock, port=5101, host='::', mirror=None, leader_xuid=None):
+    relay = Relay(out_dir, lock, port, host, mirror, leader_xuid)
     threading.Thread(target=relay.run, daemon=True).start()
     if mirror is not None:
         threading.Thread(target=relay.mirror_cars, daemon=True).start()

@@ -169,8 +169,9 @@ static void start_local_server(void) {
   _snwprintf(py, MAX_PATH, L"%lspython\\python.exe", g_onlineDir);
   _snwprintf(srv, MAX_PATH, L"%lsserver", g_onlineDir);
   if (GetFileAttributesW(py) == INVALID_FILE_ATTRIBUTES) { logf("online: %ls is missing; no local server", py); return; }
-  _snwprintf(cmd, 4 * MAX_PATH, L"\"%ls\" -I -u \"%ls\\run_server.py\" --game \"%ls\" --port %d --game-port %d",
-             py, srv, game, g_localPort, g_localPort);
+  // --leader-xuid: when this PC hosts, its own player gets the crown (session leader)
+  _snwprintf(cmd, 4 * MAX_PATH, L"\"%ls\" -I -u \"%ls\\run_server.py\" --game \"%ls\" --port %d --game-port %d --leader-xuid %llu",
+             py, srv, game, g_localPort, g_localPort, wcstoull(g_xuid, NULL, 10));
   HANDLE p = spawn_hidden(cmd, srv, L"local server");
   if (p) CloseHandle(p);
 }
