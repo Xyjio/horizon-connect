@@ -248,11 +248,20 @@ def read_collision(r):
     return h, body
 
 
-def collision_msg(h, body):
-    w = BitWriter().bits(21, 7).bits(h['a'], 1).bits(h['b'], 1).bits(h['id'], 7)
+def handle_msg(msg, h, body=None):
+    """A message that is a car handle (7-bit id) and maybe more bits after it."""
+    w = BitWriter().bits(msg, 7).bits(h['a'], 1).bits(h['b'], 1).bits(h['id'], 7)
     if h['b'] and not h['a']:
         w.bits(h['peer'], 8)
-    return concat(w, body)
+    return concat(w, body) if body else w
+
+
+def collision_msg(h, body):
+    return handle_msg(21, h, body)
+
+
+# MsgRepairDamage (35; 141804F30): the car's handle (7-bit id). Sent sequenced when a car is repaired.
+REPAIR_DAMAGE = 35
 
 
 # RequestLeaderChange (59; 1418159B0): the handle (7-bit id) of the player to make leader. DropLeadership (60;

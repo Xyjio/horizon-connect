@@ -283,7 +283,7 @@ class Relay:
                 return ['refused: the session is full'], None
             peer = self.peers[addr] = Peer(addr, self.free.pop(0), next(self.joins))
         peer.last_seen = time.monotonic()
-        out, notes, ready, out_seq, unseq, mirror_objs = [], [], [], [], [], []
+        out, notes, ready, out_seq, unseq, seqd, mirror_objs = [], [], [], [], [], [], []
         new_player = False
         peer.acks.add(hdr['id'])
         notes.append(f'peer {peer.index} id {hdr["id"]} cnt {hdr["count"]}')
@@ -351,6 +351,10 @@ class Relay:
                 unseq.append(('collision', h, body))
                 peer.collisions += 1
                 notes.append(name)
+            elif msg == nerd.REPAIR_DAMAGE:  # the car's handle: passed on (sequenced) like a collision
+                h = nerd.read_handle(r, 7)
+                seqd.append((msg, h))
+                notes.append(name)
             elif msg == 34:                  # no fields: the console has loaded the session's resources
                 notes.append(name)
                 if peer.console_id is not None and not peer.finalised:
@@ -386,6 +390,11 @@ class Relay:
                         if th is not None:
                             msgs.append(nerd.collision_msg(th, body))
                 self.send_all(p, msgs, sequenced=False)
+        if seqd:
+            for p in self.others(peer):
+                msgs = [nerd.handle_msg(m, th) for m, h in seqd for th in [self.handle_for(h, peer, p)] if th is not None]
+                if msgs:
+                    self.send_all(p, msgs)
         if out_seq:
             self.send(peer, out_seq, sequenced=True)
         reply = None
