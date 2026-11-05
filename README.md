@@ -1,12 +1,12 @@
 # Horizon Connect
 
-**Play Forza Horizon 2's online free roam with your friends again** – on your own server, without the
-Microsoft / Turn 10 servers that were shut down.
+**Play Forza Horizon 2's online free roam with your friends again** – on your own PC, without the
+Microsoft servers that were shut down.
 
-Horizon Connect is a mod for **Azimuth** (the Xbox One translation layer for Windows) with
+Horizon Connect is a mod for **Azimuth** with
 [Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions). One player hosts, the others join.
-Everything needed – the server, Python, and the internet tunnel through [playit.gg](https://playit.gg) – ships
-inside the mod folder; nothing else has to be installed.
+The programm tunnels through [playit.gg](https://playit.gg) so you dont have to portforward.
+Everything needed isinside the mod folder, nothing else has to be installed.
 
 > 🚧 **Work in progress:** what's being worked on and what comes next → [ROADMAP.md](ROADMAP.md)
 
@@ -16,17 +16,16 @@ inside the mod folder; nothing else has to be installed.
   - your saved servers with their status (`online · 2 players` / `can't be reached`)
   - **Add server** – the address you copied (e.g. from Discord) is filled in by itself
   - **Host a server** – set up once, then *Start the server and join* with one button
-  - join with **A**, edit with **X**, delete with **Y**
 - **Hosting over the internet** without port forwarding: the built-in playit.gg agent makes a tunnel; your
-  address stays the same, so friends only add it once.
-- **Joining starts the game's own *Private Free Roam Online*** – no menu digging.
+  address stays the same, so friends only have to add it once.
+- **Joining starts the game's own *Private Free Roam Online***
 - **Every player gets their own player id** automatically (and keeps their save).
 - German and English menu texts (follows the game's language).
 
 ## Requirements
 
-- Forza Horizon 2 for Xbox One, version **1.0.0.64**, that **you own**, running in **Azimuth 1.0.4**
-- **Extra Options 0.4.4** (the mod loader for Azimuth)
+- Forza Horizon 2 for Xbox One, version **1.0.0.64**, running in **Azimuth 1.0.4**
+- **Extra Options 0.4.4** (the mod loader)
 - Windows 10 or 11
 
 This repository contains **no game files**. You need your own copy of the game.
@@ -34,20 +33,13 @@ This repository contains **no game files**. You need your own copy of the game.
 ## Install
 
 1. Download `Horizon-Connect-1.0.1.zip` from the [Releases](../../releases) page.
-2. Copy the folder `Horizon Connect` into `<Azimuth folder>\mods\`.
+2.  Unzip it and copy the folder `Horizon Connect` into `<Azimuth folder>\mods\`.
 3. Start the game. If Windows Firewall asks about `python` or `playitd`, allow it.
 
-Full guide: [`docs/INSTALL.md`](docs/INSTALL.md) · the same as plain text in every release ZIP: [`package/GUIDE.txt`](package/GUIDE.txt)
+Full guide: [`docs/INSTALL.md`](docs/INSTALL.md)
 
 ## How it works
 
-```
- your game ── web calls ──► local server (fh2srv.py, 127.0.0.1:5101)          on every player's PC
-     │
-     └──── game traffic (UDP, NerdCore) ──► relay of the host (relay.py)
-                                             ▲
-              friends ── playit.gg tunnel ───┘                                 only on the host's PC
-```
 
 - **`plugin/`** – `HorizonConnect.dll`, an Extra Options plugin. It hooks the game's network imports and a few of
   Azimuth's WinRT answers so the game's Xbox Live calls get usable answers, starts the local server and the
@@ -58,30 +50,13 @@ Full guide: [`docs/INSTALL.md`](docs/INSTALL.md) · the same as plain text in ev
 
 More detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-## Building
-
-You need [Zig](https://ziglang.org) (its C compiler) for the DLL and Python 3 for the package.
-
-```powershell
-# Windows
-.\tools\build.ps1                      # -> build\HorizonConnect.dll
-python tools\package.py                # -> dist\Horizon-Connect-1.0.1.zip (downloads Python + playitd once)
-```
-
-```sh
-# Linux (cross-compiles the Windows DLL)
-./tools/build.sh
-python3 tools/package.py
-```
 
 ## Known limitations
 
 - Up to 11 players per server.
 - Every player is shown as session leader (crown).
-- Car-to-car collisions are not sent between players yet.
 - Liveries of others show once they were saved online in the paint shop.
 - Joining from the list starts free roam on the mainland (not Storm Island).
-- After choosing a server the game asks *"Free roam session found – press X"*: press X within 20 seconds.
 
 What's being worked on and what comes next: **[ROADMAP.md](ROADMAP.md)**.
 
