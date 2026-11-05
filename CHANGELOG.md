@@ -2,10 +2,12 @@
 
 ## 1.0.2
 
-- Only one player has the crown (session leader): the host when they join, otherwise whoever has been in the
-  session longest. It passes on when the leader leaves or hands it over.
-- Car-to-car collisions are sent between players.
+- One session leader (star icon in the player list, "You are the leader" hint): the host when they join,
+  otherwise whoever has been in the session longest. It passes on when the leader leaves or hands it over.
+  The session is now invite-only (private), as the game expects for private free roam.
+- Car-to-car collisions and repairs are sent between players.
 - The relay keeps every player's updates in order, even when packets arrive out of order.
+- Note: the crown next to gamertags is the VIP badge (Extra Options `OfflineVIP`), not the leader.
 
 ## 1.0.1
 

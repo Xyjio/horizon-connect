@@ -6,12 +6,6 @@ Found a bug or have a wish? Open an [issue](../../issues).
 
 **Legend:** 🚧 in progress · 📋 planned · 💡 idea (maybe) · ✅ done
 
-## 🚧 In progress
-
-- **Correct session leader (crown)** – right now every player sees the crown. The host should be the only
-  leader; the relay has to fill in the leader in the session object it sends.
-- **Collisions between players** – cars already see each other, but bumping into another player isn't sent yet.
-
 ## 📋 Planned
 
 - **Join without pressing X** – skip the *"Free roam session found – press X"* prompt.
@@ -28,6 +22,10 @@ Found a bug or have a wish? Open an [issue](../../issues).
 - A message in the game when a new version of Horizon Connect is out.
 
 ## ✅ Done
+
+### 1.0.2
+- One session leader (star icon): the host, or whoever has been in the session longest; passed on when they leave.
+- Collisions and repairs between players.
 
 ### 1.0.1
 - In-game server list in the pause menu: add, edit, delete, status and player count of each server.
