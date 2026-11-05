@@ -219,6 +219,20 @@ def server_update(router, id, seq, payload):
 # 7 AvailableArbitration, 8 MatchTicketArbiter. Bools are 1 bit; 1, 2 and 4 are the server's (SyncedBool<0,1>).
 CONSOLE_SESSION_ENTRY_FINALISED = 1
 
+# SessionHostSynced (router 6 type 0; NerdLib 14180FF70): 15 vars, so a 4-bit var index. 0 LobbyType, 1 PrivacyMode
+# (SyncedEnum<SessionPrivacy>, 2 bits: 0 Public, 1 InviteOnly - stateflow get_session_privacy, NetworkGetSessionPrivacy
+# 1408C80C0), 2 CountdownType, 3 CountdownEndTime, 4 RaceReady, ... The leader icon is only shown in an InviteOnly
+# session (HUD mini leaderboard 140ABF1C0: SessionHost PrivacyMode 0 hides it), and Horizon Connect's sessions are
+# private free roam: the server's SessionHost says InviteOnly.
+SESSION_HOST_INDEX_BITS = 4
+SESSION_PRIVACY = 1
+SESSION_INVITE_ONLY = 1
+
+
+def session_host_vars():
+    return BitWriter().bits(SESSION_PRIVACY, SESSION_HOST_INDEX_BITS).bits(SESSION_INVITE_ONLY, 2)
+
+
 # PlayerData (router 1; NerdLib, constructor 1417F3250): the player's own object, one per console. Its vars in
 # order: 0 BufChoices, 1 HasLivery, 2 IsNewLivery, 3 NetworkName, 4 XUID, 5 IsLeader, 6 NumReceivedKickVotes,
 # 7 HasFinalScore, 8.. race points and the vars of its sub-objects - more than 16 in all, so its var index is

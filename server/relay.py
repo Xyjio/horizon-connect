@@ -5,7 +5,8 @@ ResponseAck gets TimeSync and ConnectionSyncDone, Pings get Pongs, sequenced pac
 pings every half second (consoles drop a server that is quiet for 10 s).
 
 Objects: the server owns one object itself, the lobby's SessionHost (router 6, type 0), which consoles wait for
-before they finish joining (stateflow network_matchmaking.xml wait_for_session_host). Every object a console
+before they finish joining (stateflow network_matchmaking.xml wait_for_session_host). It says the session is
+InviteOnly (private), which is what shows the session leader. Every object a console
 creates or updates is forwarded to the other consoles with its handle marked as that console's (the relay
 handle: peer index), and kept in a history that is replayed in order to consoles that join later. A console's
 car (CarPredictionFull, ~30 a second, unsequenced) is forwarded the same way but not kept, and so are its
@@ -248,7 +249,7 @@ class Relay:
         everything the others own."""
         self.send(peer, [nerd.time_sync(peer.sync_index, self.now()), nerd.sync_done(OWN_ATTEMPT)])
         peer.sync_index += 1
-        world = [nerd.object_msg(7, SESSION_HOST[0], SESSION_HOST[1], 0, type=0)]
+        world = [nerd.object_msg(7, SESSION_HOST[0], SESSION_HOST[1], 0, nerd.session_host_vars(), type=0)]
         for owner, msg, o in self.history:
             world.append(self.relayed(peer, owner, msg, o['router'], o['id'], o['payload'], o.get('type', 0), o['seq']))
         self.send_all(peer, world)
