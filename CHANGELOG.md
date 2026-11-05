@@ -2,11 +2,6 @@
 
 ## 1.0.1
 
-- The menu opens with F12 instead of F6 (`[menu] Key=` sets another key). F6 is the Azimuth Mapper's hotkey for its
-  mouse pointer mode, so opening the menu took gas and brake (W/S) away from players driving with the keyboard.
-
-## 1.0.0
-
 First public version.
 
 - In-game server list in the pause menu (F6 / View): add, edit, delete servers; status and player count of each
