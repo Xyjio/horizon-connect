@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.4
+
+- Update with one button: when a new version is out, A on its row in the server list downloads and installs it,
+  then A restarts the game. Your settings and servers stay. (From 1.0.3 you update by hand once more.)
+- When your playit agent was deleted on playit.gg, the host page says "Agent deleted" and offers "Set up a new
+  one".
+
 ## 1.0.3
 
 - Same weather and time of day for everyone: the server takes the weather from the first player's game and
