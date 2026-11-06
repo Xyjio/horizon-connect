@@ -6,6 +6,13 @@ Found a bug or have a wish? Open an [issue](../../issues).
 
 **Legend:** 🚧 in progress · 📋 planned · 💡 idea (maybe) · ✅ done
 
+## 🚧 In progress
+
+- **Events online (coming in 1.0.7)** – start races together in online free roam: the leader sets up an event,
+  the others get the join prompt, everyone is on the starting grid, the race starts at the same moment, lap times
+  and results are shared, and afterwards everyone gets their rewards and goes back to free roam. Working in our
+  tests; now being tested between players over the internet.
+
 ## 📋 Planned
 
 - **Join without pressing X** – skip the *"Free roam session found – press X"* prompt.
@@ -13,8 +20,6 @@ Found a bug or have a wish? Open an [issue](../../issues).
 - **Traffic in online free roam** – the online free roam has no traffic cars yet (it came from Turn 10's
   servers).
 - **Liveries** – see the other players' liveries right away, without saving them online in the paint shop first.
-- **Events online** – start races together in online free roam (today pressing X there locks the menu: the
-  server doesn't run the event yet).
 
 ## 💡 Ideas
 

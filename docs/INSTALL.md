@@ -75,7 +75,8 @@ Your game must keep running while you host.
   When a new version is out, the server list shows it at the top: A installs it, A again restarts the game.
 - **"Agent deleted" when hosting** – your playit agent was deleted on playit.gg: **Set up a new one** → A. You get a
   new address; send it to your friends. (A free playit account has room for one agent.)
-- **Started an event (race) online and the menu is stuck** – events don't work online yet; restart the game.
+- **Started an event (race) online and the menu is stuck** – events don't work online in 1.0.6 (they're coming in
+  1.0.7); restart the game.
 - **Nothing happens after A / the search never ends** – try again from F12; if that doesn't help, restart the game.
 - **F12 does nothing** – it works only in free roam's pause menu (not in races, the Autoshow, …).
 - **The browser doesn't open when hosting** – check whether a window opened behind the game (Alt+Tab).

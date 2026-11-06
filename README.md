@@ -9,6 +9,10 @@ It tunnels through [playit.gg](https://playit.gg), so you don't have to forward 
 Everything needed is inside the mod folder; nothing else has to be installed.
 
 > 🚧 **Work in progress:** what's being worked on and what comes next → [ROADMAP.md](ROADMAP.md)
+>
+> 🏁 **Coming in 1.0.7: online events and races with your friends** – start an event in online free roam, the
+> others get the join prompt, and you race together. It works in our tests and is now being tested between
+> players over the internet.
 
 ## Features
 
@@ -57,7 +61,8 @@ More detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - Liveries of others show once they were saved online in the paint shop.
 - Joining from the list starts free roam on the mainland (not Storm Island).
 - No traffic in online free roam yet.
-- Events (races) can't be started in online free roam yet; trying it can lock the menu (restart the game).
+- Events (races) can't be started in online free roam in 1.0.6; trying it can lock the menu (restart the game).
+  Online races are coming in 1.0.7.
 
 What's being worked on and what comes next: **[ROADMAP.md](ROADMAP.md)**.
 
