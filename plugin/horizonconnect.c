@@ -703,7 +703,7 @@ static ULONG64 mix64(ULONG64 z) {   // splitmix64
 static void this_pc(wchar_t *out, int len) {
   wchar_t guid[64]; DWORD size = sizeof guid;
   out[0] = 0;
-  if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Cryptography", L"MachineGuid", RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY,
+  if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Cryptography", L"MachineGuid", RRF_RT_REG_SZ,
                    NULL, guid, &size) != ERROR_SUCCESS || !guid[0]) return;
   ULONG64 h = 0x48434F4E4E454354ULL;   // "HCONNECT"
   for (const wchar_t *c = guid; *c; c++) h = mix64(h ^ (ULONG64)towlower(*c));
