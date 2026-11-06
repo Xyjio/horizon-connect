@@ -283,7 +283,59 @@ static DWORD WINAPI update_thread(LPVOID unused) {
   return 0;
 }
 
+// Installing it (A on the update row): server\update.py downloads the release ZIP and swaps the changed files in
+// (see there); the new version runs from the next start. Not in the job object, so it finishes even if the game
+// is closed meanwhile.
+static volatile LONG g_updateState;          // 0 not started, 1 installing, 2 installed (restart), -1 failed
+
+static DWORD WINAPI update_install_thread(LPVOID unused) {
+  (void)unused;
+  wchar_t cmd[4 * MAX_PATH], srv[MAX_PATH];
+  _snwprintf(srv, MAX_PATH, L"%lsserver", g_onlineDir);
+  _snwprintf(cmd, 4 * MAX_PATH, L"\"%lspython\\python.exe\" -I -u \"%ls\\update.py\" --mod \"%ls..\\..\" --version " HC_VERSION_W,
+             g_onlineDir, srv, g_onlineDir);
+  STARTUPINFOW si = { sizeof si }; PROCESS_INFORMATION pi;
+  si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
+  if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, srv, &si, &pi)) {
+    logf("update: the updater didn't start (error %lu)", GetLastError());
+    InterlockedExchange(&g_updateState, -1);
+    return 0;
+  }
+  CloseHandle(pi.hThread);
+  WaitForSingleObject(pi.hProcess, INFINITE);
+  DWORD code = 2; GetExitCodeProcess(pi.hProcess, &code); CloseHandle(pi.hProcess);
+  logf("update: updater finished with %lu (0 updated, 1 up to date, 2 failed; details in HorizonConnect\\update.log)", code);
+  InterlockedExchange(&g_updateState, code == 0 ? 2 : -1);
+  return 0;
+}
+
+static void update_install(void) {
+  if (InterlockedCompareExchange(&g_updateState, 1, 0) == 0 || InterlockedCompareExchange(&g_updateState, 1, -1) == -1)
+    CloseHandle(CreateThread(NULL, 0, update_install_thread, NULL, 0, NULL));
+}
+
+// The files an update replaced (renamed to *.update-old while they were in use) go at the next start.
+static void update_cleanup(void) {
+  wchar_t list[MAX_PATH];
+  _snwprintf(list, MAX_PATH, L"%lsupdate-old.txt", g_onlineDir);
+  HANDLE f = CreateFileW(list, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+  if (f == INVALID_HANDLE_VALUE) return;
+  char buf[32768]; DWORD got = 0; ReadFile(f, buf, sizeof buf - 1, &got, NULL); CloseHandle(f);
+  buf[got] = 0;
+  int left = 0, gone = 0;
+  for (char *line = strtok(buf, "\r\n"); line; line = strtok(NULL, "\r\n")) {
+    if (!strstr(line, ".update-old") || strstr(line, "..") || strchr(line, ':')) continue;   // only our own leftovers
+    wchar_t rel[MAX_PATH], path[2 * MAX_PATH];
+    if (!MultiByteToWideChar(CP_UTF8, 0, line, -1, rel, MAX_PATH)) continue;
+    _snwprintf(path, 2 * MAX_PATH, L"%ls..\\..\\%ls", g_onlineDir, rel);
+    if (DeleteFileW(path) || GetLastError() == ERROR_FILE_NOT_FOUND) gone++; else left++;
+  }
+  if (!left) DeleteFileW(list);
+  logf("update: removed %d old files of the last update%s", gone, left ? " (some are still in use)" : "");
+}
+
 static void update_check_start(void) {
+  update_cleanup();
   if (GetPrivateProfileIntW(L"online", L"CheckUpdates", 1, g_ini)) CloseHandle(CreateThread(NULL, 0, update_thread, NULL, 0, NULL));
 }
 
