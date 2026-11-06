@@ -88,7 +88,7 @@ static void menu_key_load(void) {
 
 enum { PAGE_NONE, PAGE_LIST, PAGE_EDIT, PAGE_HOST, PAGE_JOIN };
 enum { ROW_OWN, ROW_SERVER, ROW_ADD, ROW_HOST, ROW_NAME, ROW_ADDRESS, ROW_SAVE, ROW_CANCEL, ROW_DELETE,
-       ROW_STATUS, ROW_HOSTADDR, ROW_HOSTTOGGLE, ROW_OWNNAME, ROW_SETUP, ROW_HOSTJOIN, ROW_EMPTY, ROW_UPDATE };
+       ROW_STATUS, ROW_HOSTADDR, ROW_HOSTTOGGLE, ROW_OWNNAME, ROW_SETUP, ROW_HOSTJOIN, ROW_EMPTY, ROW_UPDATE, ROW_AGENTGONE, ROW_NEWAGENT };
 
 typedef struct { wchar_t name[64], address[128]; } Server;
 static Server g_servers[MAX_SERVERS];
@@ -404,6 +404,7 @@ static const wchar_t *host_state_text(void) {
   return g_hostState == 3 ? TR(L"Online", L"Online")
        : g_hostState == 2 ? TR(L"Im Browser bestätigen (Alt+Tab)", L"Confirm in your browser (Alt+Tab)")
        : g_hostState == 1 ? TR(L"Wird gestartet …", L"Starting…")
+       : g_hostState == -2 ? TR(L"Agent gelöscht – siehe Server hosten", L"Agent deleted – see Host a server")
        : g_hostState < 0 ? TR(L"Fehlgeschlagen", L"Failed") : TR(L"Offline", L"Offline");
 }
 
@@ -412,6 +413,8 @@ static void row_text(int i, wchar_t *out, int n) {
   if (f) { _snwprintf(out, n, L"%ls", f); return; }
   switch (g_rowKind[i]) {
   case ROW_SETUP: _snwprintf(out, n, L"%ls", g_hostState > 0 || g_hostState < 0 ? host_state_text() : L"›"); break;
+  case ROW_AGENTGONE: out[0] = 0; break;
+  case ROW_NEWAGENT: _snwprintf(out, n, L"%ls", g_hostState > 0 ? host_state_text() : L"›"); break;
   case ROW_HOSTJOIN:
     if (g_hostState == 3) {
       const Ping *p = &g_ping[MAX_SERVERS];
@@ -604,8 +607,15 @@ static int open_page(void *pause, int kind) {
     if (g_editIndex >= 0) add_row(rows, &n, ROW_DELETE, -1, TR(L"Server löschen", L"Delete server"), TR(L"Den Server aus der Liste entfernen (zweimal A).", L"Remove the server from the list (A twice)."));
   } else if (kind == PAGE_HOST) {
     title = TR(L"SERVER HOSTEN", L"HOST A SERVER");
-    g_hostPageSetUp = host_set_up();
-    if (!g_hostPageSetUp) {
+    g_hostPageSetUp = host_set_up() && !g_agentDeleted;
+    if (g_agentDeleted && g_hostState <= 0) {
+      add_row(rows, &n, ROW_AGENTGONE, -1, TR(L"Agent gelöscht", L"Agent deleted"),
+              TR(L"Dein playit-Agent wurde auf playit.gg gelöscht. Deine bisherige Adresse funktioniert nicht mehr.",
+                 L"Your playit agent was deleted on playit.gg. Your old address doesn't work any more."));
+      add_row(rows, &n, ROW_NEWAGENT, -1, TR(L"Neuen anlegen", L"Set up a new one"),
+              TR(L"A: einen neuen Agenten anlegen. Dein Browser öffnet playit.gg: anmelden und bestätigen, dann mit Alt+Tab zurück ins Spiel. Du bekommst eine neue Adresse – schick sie deinen Freunden.",
+                 L"A: set up a new agent. Your browser opens playit.gg: log in and confirm, then come back with Alt+Tab. You get a new address – send it to your friends."));
+    } else if (!g_hostPageSetUp) {
       add_row(rows, &n, ROW_SETUP, -1, TR(L"Hosten einrichten", L"Set up hosting"),
               TR(L"Einmalig: A drücken. Dein Browser öffnet die Seite von playit.gg (kostenlos, damit Freunde über das Internet zu dir kommen). Dort anmelden oder ein Konto anlegen und bestätigen, dann mit Alt+Tab zurück ins Spiel. Danach erscheinen hier Starten und deine Adresse.",
                  L"Once: press A. Your browser opens playit.gg (free, so friends can reach you over the internet). Log in or sign up there and confirm, then come back with Alt+Tab. Start and your address then appear here."));
@@ -690,6 +700,7 @@ static void action_a(int row) {
   if (row < 0) return;
   switch (g_rowKind[row]) {
   case ROW_SETUP: if (g_hostState <= 0) online_host(); break;
+  case ROW_NEWAGENT: online_new_agent(); break;
   case ROW_HOSTJOIN:
   case ROW_OWN:
     if (g_hostState == 3) { join_address(NULL); break; }
@@ -827,7 +838,9 @@ static void page_update(void *pause) {
   if (g_pendingX) { g_pendingX = 0; logf("menu: X on row %d", g_cursor); action_x(g_cursor); }
   if (g_page && g_startOwn && g_hostState == 3) { g_startOwn = 0; join_address(NULL); }
   // the host page right after the first setup: show Start and the address
-  if (g_page && g_pageKind == PAGE_HOST && !g_hostPageSetUp && host_set_up() && !g_closeRequested) close_page(PAGE_HOST);
+  if (g_page && g_pageKind == PAGE_HOST && !g_hostPageSetUp && host_set_up() && !g_agentDeleted && !g_closeRequested) close_page(PAGE_HOST);
+  // the agent turned out to be deleted while the page showed Start: show "Agent deleted" / "Set up a new one"
+  if (g_page && g_pageKind == PAGE_HOST && g_hostPageSetUp && g_agentDeleted && g_hostState <= 0 && !g_closeRequested) close_page(PAGE_HOST);
   if (g_startOwn && g_hostState < 0) g_startOwn = 0;
   if (g_page && (g_pageKind == PAGE_LIST || g_pageKind == PAGE_HOST)) ping_servers();
   if (g_page) refresh_rows(1);
