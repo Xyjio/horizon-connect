@@ -63,7 +63,7 @@ The first time (once):
 Every time:
 
 1. Pause menu → F12 → **Host a server** → **Start the server and join** → A, then X at *"session found"*.
-2. **Address for friends** → A copies it. Send it to your friends (Ctrl+V). It stays the same, so they add it
+2. **Address for friends** → A copies it. Send it to your friends. It stays the same, so they add it
    only once.
 3. When you are done: **Stop the server** → A, or just close the game.
 
