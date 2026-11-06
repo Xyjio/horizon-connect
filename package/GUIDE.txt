@@ -136,7 +136,9 @@ don't have to install anything else.
 
   "can't be reached" in the list
       The host hasn't started their server, or you have different
-      versions of Horizon Connect. Everyone should have 1.0.
+      versions of Horizon Connect. Everyone should have the newest
+      version: when one is out, the server list shows it at the top
+      (A opens the download page).
 
   Nothing happens after A / the search takes forever
       Pause menu -> F12 -> try again. If that doesn't help, restart
