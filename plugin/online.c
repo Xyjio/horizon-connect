@@ -286,7 +286,7 @@ static DWORD WINAPI update_thread(LPVOID unused) {
 // Installing it (A on the update row): server\update.py downloads the release ZIP and swaps the changed files in
 // (see there); the new version runs from the next start. Not in the job object, so it finishes even if the game
 // is closed meanwhile.
-static volatile LONG g_updateState;          // 0 not started, 1 installing, 2 installed (restart), -1 failed
+static volatile LONG g_updateState;          // 0 not started, 1 installing, 2 installed (restart), 3 restarting, -1 failed
 
 static DWORD WINAPI update_install_thread(LPVOID unused) {
   (void)unused;
@@ -332,6 +332,49 @@ static void update_cleanup(void) {
   }
   if (!left) DeleteFileW(list);
   logf("update: removed %d old files of the last update%s", gone, left ? " (some are still in use)" : "");
+}
+
+// ---- restarting the game (after an update) -------------------------------------------------------------------------
+// server\restart.py waits until this process has ended and starts Azimuth again straight into the game
+// (--skip-launcher --game=<title>). The game is asked to close like with its window's X; if it is still there
+// after 8 s it is ended.
+static BOOL CALLBACK close_own_window(HWND w, LPARAM pid) {
+  DWORD p = 0; GetWindowThreadProcessId(w, &p);
+  if (p == (DWORD)pid && IsWindowVisible(w) && !GetWindow(w, GW_OWNER)) PostMessageW(w, WM_CLOSE, 0, 0);
+  return TRUE;
+}
+
+static DWORD WINAPI restart_thread(LPVOID unused) {
+  (void)unused;
+  Sleep(800);                                 // the menu shows "Restarting…" first
+  EnumWindows(close_own_window, (LPARAM)GetCurrentProcessId());
+  Sleep(8000);
+  logf("restart: the game didn't close; ending it");
+  TerminateProcess(GetCurrentProcess(), 0);
+  return 0;
+}
+
+static int game_restart(void) {
+  wchar_t exe[MAX_PATH], az[MAX_PATH], ini[MAX_PATH], title[64], srv[MAX_PATH], cmd[4 * MAX_PATH];
+  GetModuleFileNameW(NULL, exe, MAX_PATH);
+  azimuth_folder(az);
+  _snwprintf(ini, MAX_PATH, L"%lsdata\\azimuth.ini", az);
+  GetPrivateProfileStringW(L"launcher", L"game", L"1a96545b", title, 64, ini);
+  _snwprintf(srv, MAX_PATH, L"%lsserver", g_onlineDir);
+  _snwprintf(cmd, 4 * MAX_PATH, L"\"%lspython\\python.exe\" -I \"%ls\\restart.py\" --pid %lu -- \"%ls\" --skip-launcher --game=%ls",
+             g_onlineDir, srv, GetCurrentProcessId(), exe, title);
+  STARTUPINFOW si = { sizeof si }; PROCESS_INFORMATION pi;
+  si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
+  // not in the game's job (if Azimuth has one): the helper has to outlive the game
+  if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB, NULL, srv, &si, &pi)
+      && !CreateProcessW(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, srv, &si, &pi)) {
+    logf("restart: the helper didn't start (error %lu)", GetLastError());
+    return 0;
+  }
+  CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+  logf("restart: closing the game; %ls starts it again", exe);
+  CloseHandle(CreateThread(NULL, 0, restart_thread, NULL, 0, NULL));
+  return 1;
 }
 
 static void update_check_start(void) {
@@ -443,18 +486,20 @@ static int playit_create_tunnel(const char *secret, const char *agent_id) {
            "\"endpoint\":{\"type\":\"region\",\"details\":{\"region\":\"global\"}},\"enabled\":true}", proto, agent_id, fields);
   snprintf(bodies[2], 900, "{\"name\":\"" TUNNEL_NAME "\",\"protocol\":%s,\"origin\":{\"type\":\"agent\",\"data\":{\"agent_id\":\"%s\",\"config\":%s}},"
            "\"enabled\":true}", proto, agent_id, fields);
+  int too_old = 0;
   for (int i = 0; i < 3; i++) {
     char *reply = playit_post(L"/v1/tunnels/create", bodies[i], secret);
     logf("playit: create tunnel, try %d -> %.400s", i + 1, reply ? reply : "(no answer)");
     int ok = reply && strstr(reply, "\"status\":\"success\"");
+    if (reply && strstr(reply, "AgentVersionTooOld")) too_old = 1;
     free(reply);
     if (ok) return 1;
   }
-  return 0;
+  return too_old ? -1 : 0;
 }
 
 static int playit_tunnel(const char *secret, wchar_t *address, int len) {
-  int created = 0;
+  int created = 0, next_try = 0;
   for (int i = 0; i < 90; i++) {                          // ~3 minutes at 2 s
     char *run = playit_post(L"/v1/agents/rundata", "{}", secret);
     if (run && (i == 0 || i == 10)) logf("playit: rundata -> %.700s", run);
@@ -463,9 +508,12 @@ static int playit_tunnel(const char *secret, wchar_t *address, int len) {
     json_string(run, "agent_id", agent_id, sizeof agent_id);
     free(run);
     if (found == 1) return 1;
-    if (found == -1 && !created && agent_id[0]) {
-      created = 1;
-      if (!playit_create_tunnel(secret, agent_id)) { logf("playit: no request shape was accepted; see the answers above"); return 0; }
+    // A newly claimed agent is "too old" for playit until playitd has connected and told its version: try again.
+    if (found == -1 && !created && agent_id[0] && i >= next_try) {
+      int r = playit_create_tunnel(secret, agent_id);
+      if (r == 1) created = 1;
+      else if (r == -1) { next_try = i + 5; logf("playit: the agent hasn't reported its version yet; trying again in 10 s"); }
+      else { logf("playit: no request shape was accepted; see the answers above"); return 0; }
     }
     Sleep(2000);
   }

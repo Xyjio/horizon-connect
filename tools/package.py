@@ -60,7 +60,7 @@ def main():
     copy(os.path.join(ROOT, 'package', 'HorizonConnect.ini'), os.path.join(mod, 'plugins', 'HorizonConnect.ini'))
 
     # the server and pefile (it reads the game's executable)
-    for f in ('fh2srv.py', 'nerd.py', 'relay.py', 'run_server.py', 'update.py', 'xls.py'):
+    for f in ('fh2srv.py', 'nerd.py', 'relay.py', 'restart.py', 'run_server.py', 'update.py', 'xls.py'):
         copy(os.path.join(ROOT, 'server', f), os.path.join(online, 'server', f))
     pip_target = tempfile.mkdtemp(prefix='pefile-')
     subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--quiet', '--no-deps', '--target', pip_target, 'pefile'])

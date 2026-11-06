@@ -439,7 +439,8 @@ static void row_text(int i, wchar_t *out, int n) {
   case ROW_OWNNAME: _snwprintf(out, n, L"%ls", g_ownName); break;
   case ROW_UPDATE: _snwprintf(out, n, L"%ls",
                               g_updateState == 1 ? TR(L"Wird installiert …", L"Installing…")
-                            : g_updateState == 2 ? TR(L"Fertig – Spiel neu starten", L"Done – restart the game")
+                            : g_updateState == 3 ? TR(L"Wird neu gestartet …", L"Restarting…")
+                            : g_updateState == 2 ? TR(L"Fertig – A: Spiel neu starten", L"Done – A: restart the game")
                             : g_updateState < 0 ? TR(L"Fehlgeschlagen – A: Download-Seite", L"Failed – A: download page")
                             : TR(L"A: jetzt aktualisieren", L"A: update now")); break;
   default: _snwprintf(out, n, L" ");
@@ -569,8 +570,8 @@ static int open_page(void *pause, int kind) {
     if (g_newVersion[0]) {
       wchar_t label[96];
       _snwprintf(label, 96, TR(L"Neue Version %hs verfügbar", L"New version %hs available"), g_newVersion);
-      _snwprintf(text, 700, TR(L"Horizon Connect %hs ist erschienen (du hast " HC_VERSION_W L"). A lädt die neue Version herunter und installiert sie; sie gilt ab dem nächsten Spielstart. Deine Einstellungen und Server bleiben erhalten.",
-                               L"Horizon Connect %hs is out (you have " HC_VERSION_W L"). A downloads and installs it; it runs from the next start of the game. Your settings and servers stay."), g_newVersion);
+      _snwprintf(text, 700, TR(L"Horizon Connect %hs ist erschienen (du hast " HC_VERSION_W L"). A lädt die neue Version herunter und installiert sie, danach startet A das Spiel neu. Deine Einstellungen und Server bleiben erhalten.",
+                               L"Horizon Connect %hs is out (you have " HC_VERSION_W L"). A downloads and installs it, then A restarts the game. Your settings and servers stay."), g_newVersion);
       add_row(rows, &n, ROW_UPDATE, -1, label, text);
     }
     g_pingAt = 0; ping_servers();
@@ -707,6 +708,7 @@ static void action_a(int row) {
   case ROW_UPDATE:
     if (g_updateState < 0) { ShellExecuteW(NULL, L"open", g_newUrl, NULL, NULL, SW_SHOWNORMAL); say(row, TR(L"Im Browser geöffnet (Alt+Tab)", L"Opened in your browser (Alt+Tab)")); }
     else if (g_updateState == 0) update_install();
+    else if (g_updateState == 2 && game_restart()) InterlockedExchange(&g_updateState, 3);
     break;
   case ROW_NAME: { wchar_t t[64]; clip_text(t, 41); if (t[0]) wcscpy(g_editName, t); else say(row, TR(L"Zwischenablage ist leer", L"Clipboard is empty")); break; }
   case ROW_ADDRESS: {
