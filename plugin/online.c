@@ -292,6 +292,14 @@ static void secret_path(wchar_t *out) {
   if (!GetEnvironmentVariableW(L"LOCALAPPDATA", base, MAX_PATH)) wcscpy(base, L".");
   _snwprintf(out, MAX_PATH, L"%ls\\HorizonConnect", base);
   CreateDirectoryW(out, NULL);
+  // [online] SecretName (testing two copies of the game on one PC): another file name in the same folder, so the
+  // second copy sets up its own agent. Only a plain file name is taken, so the secret never lands in the mod folder.
+  wchar_t name[64];
+  GetPrivateProfileStringW(L"online", L"SecretName", L"", name, 64, g_ini);
+  if (name[0] && !wcspbrk(name, L"\\/:") && !wcsstr(name, L"..")) {
+    wcscat(out, L"\\"); wcscat(out, name);
+    return;
+  }
   wcscat(out, L"\\playit-secret.txt");
   // before the rename (FH2 Online 0.x) it was kept in %LOCALAPPDATA%\FH2Online: take it over, so the agent and
   // its tunnel address stay the same
