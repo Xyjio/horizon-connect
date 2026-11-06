@@ -59,6 +59,9 @@ NAMES = dict(enumerate([
 FORWARD_UNSEQUENCED = (20, 24)   # broken glass, a part torn off a smashable: passed on to the others like a car
 TRAFFIC = (16, 17, 71, 73, 74)   # the traffic director's messages (Turn 10's server ran it): read, not answered
 SERVER_OWNER = 0                 # owner index of the server's own objects in Peer.out_seq (consoles are 1..)
+# Online the time of day follows the server clock (StartNetworkSync, 14197AF90): seconds of day =
+# server ms / 1000 * 48 mod 86400, so a game day lasts 30 minutes. The clock starts at start_hour.
+TOD_SCALE = 48
 WEATHER_MIN_MS, WEATHER_MAX_MS = 60_000, 20 * 60_000   # how soon / late the server asks for the next weather
 OWN_ATTEMPT = 1
 SESSION_HOST = (6, 0)        # router, object id of the server's SessionHost
@@ -94,7 +97,7 @@ class Peer:
 
 
 class Relay:
-    def __init__(self, out_dir, lock, port=5101, host='::', mirror=None, leader_xuid=None):
+    def __init__(self, out_dir, lock, port=5101, host='::', mirror=None, leader_xuid=None, start_hour=10.0):
         self.out_dir, self.lock = out_dir, lock
         self.mirror = mirror                 # seconds: each console also gets itself back as a ghost player
         self.leader_xuid = leader_xuid       # the host's player id: its console takes the crown when it joins
@@ -103,7 +106,7 @@ class Relay:
         self.sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)   # IPv4 consoles too (as ::ffff:a.b.c.d)
         self.sock.bind((host, port))
         self.mu = threading.RLock()
-        self.t0 = time.monotonic()
+        self.t0 = time.monotonic() - (start_hour % 24) * 3600 / TOD_SCALE   # server clock at start: start_hour o'clock
         self.peers = {}
         self.joins = itertools.count()
         self.free = list(range(1, MAX_PLAYERS - (1 if mirror is not None else 0)))   # unused peer indexes
@@ -604,8 +607,8 @@ class Relay:
                 self.weather_tick()
 
 
-def start(out_dir, lock, port=5101, host='::', mirror=None, leader_xuid=None):
-    relay = Relay(out_dir, lock, port, host, mirror, leader_xuid)
+def start(out_dir, lock, port=5101, host='::', mirror=None, leader_xuid=None, start_hour=10.0):
+    relay = Relay(out_dir, lock, port, host, mirror, leader_xuid, start_hour)
     threading.Thread(target=relay.run, daemon=True).start()
     if mirror is not None:
         threading.Thread(target=relay.mirror_cars, daemon=True).start()
