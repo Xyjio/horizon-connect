@@ -608,9 +608,12 @@ static DWORD WINAPI host_thread(LPVOID unused) {
   return 0;
 }
 
+// One setup at a time: the state is taken (set to 1) before the thread starts, so a second A right away does nothing.
 static void online_host(void) {
-  if (g_hostState > 0) return;
-  CloseHandle(CreateThread(NULL, 0, host_thread, NULL, 0, NULL));
+  LONG s = g_hostState;
+  if (s > 0 || InterlockedCompareExchange(&g_hostState, 1, s) != s) return;
+  HANDLE t = CreateThread(NULL, 0, host_thread, NULL, 0, NULL);
+  if (t) CloseHandle(t); else g_hostState = -1;
 }
 
 // "Set up a new one" after the agent was deleted: the old key is put aside (playit-secret.txt.deleted), the old
@@ -624,7 +627,7 @@ static void online_new_agent(void) {
   g_hostAddress[0] = 0;
   WritePrivateProfileStringW(L"online", L"HostAddress", L"", g_ini);
   InterlockedExchange(&g_agentDeleted, 0);
-  g_hostState = 0;
+  InterlockedExchange(&g_hostState, 0);
   logf("playit: setting up a new agent");
   online_host();
 }
