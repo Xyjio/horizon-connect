@@ -150,6 +150,9 @@ don't have to install anything else.
       Pause menu -> F12 -> try again. If that doesn't help, restart
       the game.
 
+  Started an event (race) online and the menu is stuck
+      Events don't work in online free roam yet. Restart the game.
+
   F12 does nothing
       F12 only works in free roam's pause menu (not in races, not in
       the Autoshow, etc.).

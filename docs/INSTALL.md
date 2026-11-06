@@ -9,7 +9,7 @@
 ## 2. Install
 
 1. Back up your save first: copy `<Azimuth folder>\data\titles\1A96545B\saves` somewhere.
-2. Unpack `Horizon-Connect-1.0.5.zip`.
+2. Unpack `Horizon-Connect-1.0.6.zip`.
 3. Copy the folder `Horizon Connect` into `<Azimuth folder>\mods\`.
    `mods\Horizon Connect\mod.json` and `mods\Horizon Connect\plugins\` must be directly inside it.
 4. Check your player name – the name next to the round profile icon at the top right of Azimuth's start window.
@@ -75,6 +75,7 @@ Your game must keep running while you host.
   When a new version is out, the server list shows it at the top: A installs it, A again restarts the game.
 - **"Agent deleted" when hosting** – your playit agent was deleted on playit.gg: **Set up a new one** → A. You get a
   new address; send it to your friends. (A free playit account has room for one agent.)
+- **Started an event (race) online and the menu is stuck** – events don't work online yet; restart the game.
 - **Nothing happens after A / the search never ends** – try again from F12; if that doesn't help, restart the game.
 - **F12 does nothing** – it works only in free roam's pause menu (not in races, the Autoshow, …).
 - **The browser doesn't open when hosting** – check whether a window opened behind the game (Alt+Tab).

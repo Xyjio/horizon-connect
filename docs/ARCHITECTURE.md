@@ -51,8 +51,15 @@ cars). Horizon Connect answers all of that on the players' own PCs.
   chooses the session leader - the host when they join, else whoever has been in the session longest - and sets
   it in each player's PlayerData (`IsLeader`). It owns the session's WeatherSynced object: the first console's
   FullWeather sets it, later Atmosphere / Precipitation requests keep it moving. The time of day online is the
-  server clock (48 game seconds per real second), so the clock starts at `--start-hour` (10:00). It also answers `FH2O?` with `FH2O!{"players": n, "max": m}` for the server list.
-- `run_server.py` – starts `fh2srv.py` and keeps its output in `logs\`.
+  server clock (48 game seconds per real second), so the clock starts at `--start-hour` (10:00). It also answers `FH2O?` with `FH2O!{"players": n, "max": m}` for the server list
+  and `FH2N?` with the players' gamertags (`FH2N!{xuid: name}`, from each PlayerData), which every player's
+  fh2srv asks when the game wants another player's profile (the DLL sends the relay's address in
+  `X-Horizon-Relay`). Its sequenced packets are kept until the console acks them and sent again after 0.4 s; a
+  packet it can't read is skipped; only an FH2 OpenConnection gets a player slot. It listens on 127.0.0.1 (the
+  host's console and the playit agent) unless `--game-host ::` (`[online] OpenToLan=1`).
+- fh2srv answers only the game's requests (`X-Horizon-Host` and a 127.0.0.1 / localhost Host).
+- `run_server.py` – starts `fh2srv.py` and keeps its output in `logs\` (the newest 30; capture lists over 20 MB
+  are rotated, request bodies older than 7 days removed).
 - `update.py` – installs the newest release from GitHub over the running mod: changed files are swapped in (files
   in use are renamed to `*.update-old`, deleted by the plugin at the next start), `HorizonConnect.ini` keeps the
   player's values and gets new settings added, and a failed swap is undone.
@@ -61,4 +68,6 @@ cars). Horizon Connect answers all of that on the players' own PCs.
 ## Settings
 
 `HorizonConnect.ini` next to the DLL. The shipped one (`package/HorizonConnect.ini`) is all a player needs; `Xuid=auto` and
-`LocalAddress=auto` are replaced by the player's own values at the first start.
+`LocalAddress=auto` are replaced by the player's own values at the first start; `[xbl] Owner` (a hash of the PC's
+MachineGuid) makes a folder copied to another PC get its own id there. The DLL converts the file to UTF-16 once, so
+names in any script survive `WritePrivateProfileString`.

@@ -13,13 +13,19 @@ Found a bug or have a wish? Open an [issue](../../issues).
 - **Traffic in online free roam** – the online free roam has no traffic cars yet (it came from Turn 10's
   servers).
 - **Liveries** – see the other players' liveries right away, without saving them online in the paint shop first.
+- **Events online** – start races together in online free roam (today pressing X there locks the menu: the
+  server doesn't run the event yet).
 
 ## 💡 Ideas
 
-- Online events and road trips together (racing each other).
+- Road trips together.
 - Player list for the host in the HORIZON CONNECT menu (who is connected).
 
 ## ✅ Done
+
+### 1.0.6
+- Gamertags of the other players.
+- More stable sessions (lost packets sent again, long sessions, bad packets).
 
 ### 1.0.5
 - Fix for players being disconnected again and again.

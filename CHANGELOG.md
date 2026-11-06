@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.6
+
+- The other players' gamertags instead of "Driver 1234" (everyone in the session needs 1.0.6 for this).
+- More stable sessions over the internet: lost packets are sent again, objects keep updating in long sessions,
+  bad or strange packets are skipped, and unusable weather values are ignored.
+- The host's server only listens to this PC and the playit tunnel (for LAN play without playit:
+  `OpenToLan=1` in `[online]`), and the local web server answers only the game.
+- A mod folder copied to another PC gets its own player id there; settings keep any characters (the ini is
+  stored as Unicode); old server logs and captures are cleaned up.
+- The update check also finds releases marked as pre-release; restarting after an update waits for open game
+  windows instead of ending the game by force.
+- Note: starting an event (race) in online free roam doesn't work yet and can lock the menu.
+
 ## 1.0.5
 
 - Fix: players were disconnected again and again. When a part of a roadside object came off, the host's server
