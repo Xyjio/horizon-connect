@@ -31,8 +31,9 @@ cars). Horizon Connect answers all of that on the players' own PCs.
 - `patches.c` – the player id (Azimuth's XboxUserId) and two waits the game would never finish without Turn 10's
   traffic / weather service.
 - `online.c` – starts the local server (hidden, ends with the game), sets up and runs the playit agent,
-  decides where the game's UDP goes (`online_set_join`) and asks GitHub for the newest release
-  (`CheckUpdates`).
+  decides where the game's UDP goes (`online_set_join`), asks GitHub for the newest release (`CheckUpdates`),
+  runs `update.py` / `restart.py` from the update row, and notices a playit agent deleted on playit.gg
+  (`InvalidAgentKey`).
 - `menu.c` – the HORIZON CONNECT pages in the pause menu: native pages of the game (a VideoOptions page with its own
   XAML), the server list with status pings, adding / editing servers, hosting; joining fires the pause menu's
   own `online_private_freeroam` transition.
@@ -52,6 +53,10 @@ cars). Horizon Connect answers all of that on the players' own PCs.
   FullWeather sets it, later Atmosphere / Precipitation requests keep it moving. The time of day online is the
   server clock (48 game seconds per real second), so the clock starts at `--start-hour` (10:00). It also answers `FH2O?` with `FH2O!{"players": n, "max": m}` for the server list.
 - `run_server.py` – starts `fh2srv.py` and keeps its output in `logs\`.
+- `update.py` – installs the newest release from GitHub over the running mod: changed files are swapped in (files
+  in use are renamed to `*.update-old`, deleted by the plugin at the next start), `HorizonConnect.ini` keeps the
+  player's values and gets new settings added, and a failed swap is undone.
+- `restart.py` – waits until the game has closed and starts Azimuth again (`--skip-launcher --game=<title>`).
 
 ## Settings
 

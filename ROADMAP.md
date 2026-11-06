@@ -21,6 +21,10 @@ Found a bug or have a wish? Open an [issue](../../issues).
 
 ## ✅ Done
 
+### 1.0.4
+- Update and restart from the server list with one button.
+- The host page notices a deleted playit agent and sets up a new one.
+
 ### 1.0.3
 - Same weather and time of day for everyone.
 - The relay passes on all of the game's messages for other players (e.g. glass, parts coming off).
