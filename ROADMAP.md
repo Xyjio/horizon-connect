@@ -10,18 +10,21 @@ Found a bug or have a wish? Open an [issue](../../issues).
 
 - **Join without pressing X** – skip the *"Free roam session found – press X"* prompt.
 - **Storm Island** – join the online free roam on Storm Island, not only on the mainland.
-- **Same weather and time of day for everyone** – the server doesn't make the session's weather yet, so each
-  player keeps their own.
-- **Traffic in online free roam** – the online free roam has no traffic cars yet.
+- **Traffic in online free roam** – the online free roam has no traffic cars yet (it came from Turn 10's
+  servers).
 - **Liveries** – see the other players' liveries right away, without saving them online in the paint shop first.
 
 ## 💡 Ideas
 
 - Online events and road trips together (racing each other).
 - Player list for the host in the HORIZON CONNECT menu (who is connected).
-- A message in the game when a new version of Horizon Connect is out.
 
 ## ✅ Done
+
+### 1.0.3
+- Same weather and time of day for everyone.
+- The relay passes on all of the game's messages for other players (e.g. glass, parts coming off).
+- A message in the server list when a new version is out.
 
 ### 1.0.2
 - One session leader (star icon): the host, or whoever has been in the session longest; passed on when they leave.
