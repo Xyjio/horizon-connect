@@ -21,7 +21,9 @@
 static int g_autoServer, g_localPort = 5101;
 static wchar_t g_onlineDir[MAX_PATH];        // ...\plugins\HorizonConnect\ (trailing backslash)
 static HANDLE g_job;                          // children die with the game
-static volatile LONG g_hostState;             // 0 off, 1 setting up, 2 waiting for the browser, 3 online, -1 failed
+static volatile LONG g_hostState;             // 0 off, 1 setting up, 2 waiting for the browser, 3 online, -1 failed,
+                                              // -2 the agent was deleted on playit.gg
+static volatile LONG g_agentDeleted;          // the saved agent key is no longer valid (the host page offers a new one)
 static wchar_t g_hostAddress[256];            // the tunnel's public address, once known
 static wchar_t g_lastJoin[256];              // the last server joined from the list (shown there)
 static wchar_t g_joinAddress[256];            // the relay this console uses ("" = its own)
@@ -532,12 +534,39 @@ static int start_agent(const char *secret) {
 // playit's tunnels for an agent key can only be made by a "self-managed" agent (playit's own app claims
 // "assignable" agents, whose tunnels are set up on the website). New claims are self-managed; an older
 // assignable agent that can't make the tunnel is replaced by a self-managed one (the browser opens once more).
+// playit answers {"status":"error","data":{"type":"auth","message":"InvalidAgentKey"}} for an agent key that was
+// deleted on playit.gg (or never existed).
+static int agent_key_invalid(const char *secret) {
+  char *run = playit_post(L"/v1/agents/rundata", "{}", secret);
+  int invalid = run && strstr(run, "InvalidAgentKey");
+  free(run);
+  return invalid;
+}
+
+// At start, when hosting was set up: is the agent still there? Then the host page can say so right away.
+static DWORD WINAPI agent_check_thread(LPVOID unused) {
+  (void)unused;
+  char secret[256];
+  if (load_secret(secret, sizeof secret) && agent_key_invalid(secret)) {
+    InterlockedExchange(&g_agentDeleted, 1);
+    logf("playit: the agent was deleted on playit.gg; the host page offers a new one");
+  }
+  SecureZeroMemory(secret, sizeof secret);
+  return 0;
+}
+
 static DWORD WINAPI host_thread(LPVOID unused) {
   (void)unused;
   g_hostState = 1;
   char secret[256];
   for (int attempt = 0; attempt < 2; attempt++) {
     if (!load_secret(secret, sizeof secret) && !playit_claim(secret, sizeof secret, "self-managed")) { g_hostState = -1; return 0; }
+    if (agent_key_invalid(secret)) {
+      logf("playit: the agent was deleted on playit.gg");
+      InterlockedExchange(&g_agentDeleted, 1);
+      g_hostState = -2;
+      return 0;
+    }
     g_hostState = 1;
     if (!start_agent(secret)) { g_hostState = -1; return 0; }
     if (playit_tunnel(secret, g_hostAddress, 256)) {
@@ -564,6 +593,22 @@ static DWORD WINAPI host_thread(LPVOID unused) {
 static void online_host(void) {
   if (g_hostState > 0) return;
   CloseHandle(CreateThread(NULL, 0, host_thread, NULL, 0, NULL));
+}
+
+// "Set up a new one" after the agent was deleted: the old key is put aside (playit-secret.txt.deleted), the old
+// address forgotten, and hosting set up again like the first time (claim in the browser).
+static void online_new_agent(void) {
+  if (g_hostState > 0) return;
+  wchar_t p[MAX_PATH], old[MAX_PATH];
+  secret_path(p);
+  _snwprintf(old, MAX_PATH, L"%ls.deleted", p);
+  MoveFileExW(p, old, MOVEFILE_REPLACE_EXISTING);
+  g_hostAddress[0] = 0;
+  WritePrivateProfileStringW(L"online", L"HostAddress", L"", g_ini);
+  InterlockedExchange(&g_agentDeleted, 0);
+  g_hostState = 0;
+  logf("playit: setting up a new agent");
+  online_host();
 }
 
 static void online_unhost(void) {
@@ -594,6 +639,7 @@ static void online_start(const wchar_t *plugin_dir) {
   // (a remembered remote server that isn't up could otherwise be used by the game at start).
   GetPrivateProfileStringW(L"online", L"LastJoin", L"", g_lastJoin, 256, g_ini);
   GetPrivateProfileStringW(L"online", L"HostAddress", L"", g_hostAddress, 256, g_ini);   // hosting was set up before
+  if (g_hostAddress[0]) CloseHandle(CreateThread(NULL, 0, agent_check_thread, NULL, 0, NULL));
   if (!g_lastJoin[0]) GetPrivateProfileStringW(L"online", L"Join", L"", g_lastJoin, 256, g_ini);
   WritePrivateProfileStringW(L"online", L"Join", NULL, g_ini);
   online_set_join(L"");
