@@ -21,6 +21,9 @@ Found a bug or have a wish? Open an [issue](../../issues).
 
 ## ✅ Done
 
+### 1.0.5
+- Fix for players being disconnected again and again.
+
 ### 1.0.4
 - Update and restart from the server list with one button.
 - The host page notices a deleted playit agent and sets up a new one.

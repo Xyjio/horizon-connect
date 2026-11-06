@@ -56,7 +56,7 @@ NAMES = dict(enumerate([
     'BucketListStatusChallengeStarted', 'BucketListStatusChallengeEnded', 'MsgDebugLog', 'MsgInactivePlayersPulled',
     'ServerTrafficMessage', 'ClientTrafficMessage', 'ServerTrafficFullRoute', 'ServerTrafficStationary',
     'ClientTrafficFullRoute', 'ClientTrafficStationary']))
-FORWARD_UNSEQUENCED = (20, 24)   # broken glass, a part torn off a smashable: passed on to the others like a car
+FORWARD_UNSEQUENCED = (20,)      # broken glass, passed on like a car (24, a part torn off a smashable, is read, not passed on yet)
 TRAFFIC = (16, 17, 71, 73, 74)   # the traffic director's messages (Turn 10's server ran it): read, not answered
 SERVER_OWNER = 0                 # owner index of the server's own objects in Peer.out_seq (consoles are 1..)
 # Online the time of day follows the server clock (StartNetworkSync, 14197AF90): seconds of day =
@@ -118,6 +118,7 @@ class Relay:
         self.weather_asked = None            # when (now) a console was last asked for its full weather
         self.next_weather = {}               # 'a' / 'p' -> when to ask for new atmosphere / precipitation data
         self.n = 0
+        self.strangers = 0                   # packets from addresses that aren't consoles (ignored)
         print(f'fh2srv game UDP (relay) on [{host}]:{port}' + (f', leader: player {leader_xuid} when present' if leader_xuid else ''), flush=True)
 
     def now(self):
@@ -269,7 +270,7 @@ class Relay:
     def leader_request(self, peer, target):
         """RequestLeaderChange / DropLeadership from `peer`: only the leader can pass the crown on."""
         if peer.index != self.leader:
-            return f'(not the leader: ignored)'
+            return '(not the leader: ignored)'
         cands = [p for p in self.peers.values() if p.synced and p.player_id is not None and p is not peer]
         if target is None:                   # DropLeadership: to the console in the session longest
             if not cands:
@@ -399,6 +400,21 @@ class Relay:
             return None
         return h
 
+    @staticmethod
+    def not_a_console(data, r):
+        """Why a packet from an unknown address isn't a console's first one (None: it is): it must start with an
+        OpenConnection for FH2 (game "Flagship", version = the game's 8-digit build hash)."""
+        try:
+            q = nerd.BitReader(data, r.pos)
+            if q.bits(7) != 0:
+                return 'not an OpenConnection'
+            oc = nerd.read_open_connection(q)
+        except Exception:
+            return 'unreadable'
+        if oc['game'] != 'Flagship' or len(oc['version']) != 8 or not all(c in '0123456789ABCDEFabcdef' for c in oc['version']):
+            return f'not FH2 ({oc["game"][:16]!r} {oc["version"][:38]!r})'
+        return None
+
     def handle(self, data, addr):
         p = nerd.parse(data)
         if not p:
@@ -410,6 +426,14 @@ class Relay:
             self.drop(peer, 'new connection')
             peer = None
         if peer is None:
+            # Only a console's OpenConnection gets a player slot - not port scans or stray packets (seen through
+            # the tunnel: RakNet pings), which would otherwise fill the session.
+            why = self.not_a_console(data, r)
+            if why:
+                self.strangers += 1
+                if self.strangers <= 5 or self.strangers % 100 == 0:
+                    print(f'{time.strftime("%H:%M:%S")} [{addr[0]}]:{addr[1]} ignored ({why}; {self.strangers} so far)', flush=True)
+                return [f'ignored: {why}'], None
             if not self.free:
                 print(f'{time.strftime("%H:%M:%S")} [{addr[0]}]:{addr[1]} refused: the session is full', flush=True)
                 return ['refused: the session is full'], None
@@ -570,7 +594,10 @@ class Relay:
                 continue
             with self.mu:
                 self.n += 1
-                notes, reply = self.handle(data, addr)
+                try:
+                    notes, reply = self.handle(data, addr)
+                except Exception as e:           # never let one packet stop the relay
+                    notes, reply = [f'error {type(e).__name__}: {e}'], None
             rec = {'n': self.n, 'time': time.time(), 'from': f'[{addr[0]}]:{addr[1]}', 'hex': data.hex(), 'what': ' | '.join(notes)}
             if reply:
                 rec['reply'] = reply.hex()
@@ -604,7 +631,10 @@ class Relay:
                         self.drop(p, f'quiet for {QUIET_DROP_S} s')
                     elif p.synced:
                         self.send(p, [nerd.ping(self.now())])
-                self.weather_tick()
+                try:
+                    self.weather_tick()
+                except Exception as e:
+                    print(f'{time.strftime("%H:%M:%S")} weather: {type(e).__name__}: {e}', flush=True)
 
 
 def start(out_dir, lock, port=5101, host='::', mirror=None, leader_xuid=None, start_hour=10.0):

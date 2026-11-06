@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.5
+
+- Fix: players were disconnected again and again. When a part of a roadside object came off, the host's server
+  read the message wrongly and stopped; after 15 s everyone was dropped. A bad packet no longer stops the server,
+  and that message is read correctly (the part coming off isn't shown to the others yet).
+- Packets from outside the game (port scans through the tunnel) no longer take player slots.
+
 ## 1.0.4
 
 - Update with one button: when a new version is out, A on its row in the server list downloads and installs it,
