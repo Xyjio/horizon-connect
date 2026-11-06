@@ -233,8 +233,10 @@ static int json_string(const char *json, const char *key, char *out, int len) {
 // ---- update check -------------------------------------------------------------------------------------------------
 // [online] CheckUpdates=1 (default): a few seconds after start, ask GitHub for the newest release. When it is newer
 // than this version, the server list shows a row for it (A opens the release page in the browser).
-#define HC_RELEASES_API L"/repos/Xyjio/horizon-connect/releases/latest"
-#define HC_RELEASES_PAGE L"https://github.com/Xyjio/horizon-connect/releases/latest"
+// The release list, not /releases/latest: that one leaves out releases marked as pre-release (and answers 404 when
+// all are).
+#define HC_RELEASES_API L"/repos/Xyjio/horizon-connect/releases?per_page=20"
+#define HC_RELEASES_PAGE L"https://github.com/Xyjio/horizon-connect/releases"
 static char g_newVersion[32];             // the newest release's version if it is newer than HC_VERSION, else ""
 static wchar_t g_newUrl[256] = HC_RELEASES_PAGE;
 
@@ -279,15 +281,17 @@ static char *https_get(const wchar_t *host, const wchar_t *path) {
 static DWORD WINAPI update_thread(LPVOID unused) {
   (void)unused;
   Sleep(8000);                            // not while the game is starting up
-  char *reply = https_get(L"api.github.com", HC_RELEASES_API), tag[32], url[256];
-  if (reply && json_string(reply, "tag_name", tag, sizeof tag)) {
+  char *reply = https_get(L"api.github.com", HC_RELEASES_API), tag[32], best[32] = "";
+  for (const char *p = reply; p && (p = strstr(p, "\"tag_name\":\"")); p++) {   // the highest version in the list
+    if (!json_string(p, "tag_name", tag, sizeof tag)) continue;
     const char *v = (tag[0] == 'v' || tag[0] == 'V') ? tag + 1 : tag;
-    if (version_cmp(v, HC_VERSION) > 0) {
-      if (json_string(reply, "html_url", url, sizeof url) && !strncmp(url, "https://github.com/", 19)) _snwprintf(g_newUrl, 256, L"%hs", url);
-      snprintf(g_newVersion, sizeof g_newVersion, "%s", v);
-      logf("update: Horizon Connect %s is out (this is " HC_VERSION ") - %ls", v, g_newUrl);
-    } else logf("update: up to date (newest release %s)", v);
-  } else logf("update: no answer from GitHub");
+    if (isdigit((unsigned char)*v) && (!best[0] || version_cmp(v, best) > 0)) snprintf(best, sizeof best, "%s", v);
+  }
+  if (!best[0]) logf("update: no answer from GitHub");
+  else if (version_cmp(best, HC_VERSION) > 0) {
+    snprintf(g_newVersion, sizeof g_newVersion, "%s", best);
+    logf("update: Horizon Connect %s is out (this is " HC_VERSION ") - %ls", best, g_newUrl);
+  } else logf("update: up to date (newest release %s)", best);
   free(reply);
   return 0;
 }

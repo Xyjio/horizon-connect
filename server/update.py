@@ -17,7 +17,7 @@ start. Exit code: 0 updated, 1 already up to date, 2 failed. Progress goes to st
 import argparse, io, json, os, re, sys, time, urllib.request, zipfile
 
 REPO = 'Xyjio/horizon-connect'
-API = f'https://api.github.com/repos/{REPO}/releases/latest'
+API = f'https://api.github.com/repos/{REPO}/releases?per_page=20'   # not /latest: it leaves out pre-releases
 DOWNLOADS = f'https://github.com/{REPO}/releases/download/'
 TOP = 'Horizon Connect/'                     # the mod folder inside the release ZIP
 INI = 'plugins/HorizonConnect.ini'
@@ -48,7 +48,11 @@ def fetch(url, accept=None):
 
 
 def newest_release():
-    rel = json.loads(fetch(API, 'application/vnd.github+json'))
+    rels = [r for r in json.loads(fetch(API, 'application/vnd.github+json'))
+            if not r.get('draft') and re.match(r'[vV]?\d', r.get('tag_name', ''))]
+    if not rels:
+        raise RuntimeError('no releases')
+    rel = max(rels, key=lambda r: version_tuple(r['tag_name'].lstrip('vV')))
     version = rel['tag_name'].lstrip('vV')
     assets = [a for a in rel.get('assets', []) if a['name'].lower() == f'horizon-connect-{version}.zip'.lower()]
     if not assets:
