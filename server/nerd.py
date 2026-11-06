@@ -245,6 +245,21 @@ def session_host_vars():
 PLAYER_ROUTER = 1
 PLAYER_INDEX_BITS = 8
 PLAYER_IS_LEADER = 5
+PLAYER_NETWORK_NAME, PLAYER_XUID = 3, 4
+
+
+def read_player_name(payload):
+    """(gamertag, xuid) from a PlayerData create's payload (it starts with NetworkName, then XUID), or None."""
+    try:
+        r = BitReader(bytes(payload.buf))
+        if r.bits(PLAYER_INDEX_BITS) != PLAYER_NETWORK_NAME:
+            return None
+        name = ''.join(chr(r.bits(16)) for _ in range(r.bits(5)))
+        if r.bits(PLAYER_INDEX_BITS) != PLAYER_XUID:
+            return None
+        return name, r.bits(64)
+    except IndexError:
+        return None
 
 
 def bool_var(index, value, index_bits=4):
@@ -288,9 +303,10 @@ def read_leader_change(r):
 
 # Formats of the other messages a console sends (from each one's Send function; the receive side reads the
 # same). A field is ('h', id bits): a handle; ('u', n): n bits; ('blob',): compact length + 8-bit bytes
-# (BitStream 14176A900 - strings and the 8-byte doubles of the score messages). The relay reads these so the
-# rest of a packet isn't lost behind them.
+# (BitStream 14176A900 - strings and the 8-byte doubles of the score messages); ('bytes', n): an n-bit count, then
+# that many 8-bit bytes. The relay reads these so the rest of a packet isn't lost behind them.
 U = lambda n: ('u', n)
+BYTES = lambda n: ('bytes', n)
 H7, H2, BLOB = ('h', 7), ('h', 2), ('blob',)
 VEC3 = U(96)                   # 3 floats (14181FFA0)
 MSG_FORMATS = {
@@ -299,13 +315,13 @@ MSG_FORMATS = {
     20: [H7, U(32), VEC3, U(32)],                              # MsgBreakGlass (141804B10)
     22: [U(16), U(384)],                                       # MsgCollObjPos (receive 1417DDA10)
     23: [U(16), U(384), U(32)],                                # MsgCollObjRest (1417DDDC0)
-    24: [U(4), U(11), U(8)],                                   # MsgCollObjDetachPart (1417DDB10)
+    24: [U(4), BYTES(11)],                                     # MsgCollObjDetachPart (send 1417DDB10; ~1 KB seen)
     25: [U(16), U(288), U(32), U(32)],                         # MsgCollObjPosVel (1417DDCC0)
     26: [U(2), U(32)],                                         # MsgCarMeetPlayerInviteRequest (1417F75D0)
     27: [U(1), U(2), U(32)],                                   # MsgCarMeetPlayerJoinOrCancelRequest (1417F70F0)
     31: [U(32)],                                               # MsgCarMeetConfiguredGameOptionsForWagerRace
     32: [BLOB, BLOB],                                          # MsgCarMeetGameModeSessionReady (1417F7380)
-    33: [U(64), U(7), U(8)],                                   # MsgChatManagement (1417F5040)
+    33: [U(64), BYTES(7)],                                     # MsgChatManagement (1417F5040)
     36: [H7, H7, U(12)],                                       # MsgTagCollision (1418048B0)
     38: [],                                                    # MsgRequestRace
     41: [H2, U(1)],                                            # MsgReadyRequest (1417F7B20)
@@ -338,8 +354,10 @@ def read_fields(r, fmt):
         elif f[0] == 'u':
             out.append(('u', f[1], r.bits(f[1])))
         else:
-            n = r.cuint()
-            out.append(('blob', bytes(r.bits(8) for _ in range(n))))
+            n = r.cuint() if f[0] == 'blob' else r.bits(f[1])
+            if n * 8 > r.left():
+                raise ValueError(f'{n} bytes announced, {r.left() // 8} left')
+            out.append((f[0], f[1] if f[0] == 'bytes' else None, bytes(r.bits(8) for _ in range(n))))
     return out
 
 
@@ -354,8 +372,11 @@ def write_fields(msg, fields):
         elif f[0] == 'u':
             w.bits(f[2], f[1])
         else:
-            w.cuint(len(f[1]))
-            for c in f[1]:
+            if f[0] == 'blob':
+                w.cuint(len(f[2]))
+            else:
+                w.bits(len(f[2]), f[1])
+            for c in f[2]:
                 w.bits(c, 8)
     return w
 
