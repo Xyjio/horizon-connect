@@ -35,13 +35,31 @@ import itertools, json, os, socket, threading, time
 
 import nerd
 
-NAMES = {0: 'OpenConnection', 1: 'OpenConnectionResponse', 2: 'CloseConnection', 3: 'Ping', 4: 'Pong',
-         5: 'TimeSync', 6: 'ConnectionSyncDone', 7: 'ObjectCreate', 8: 'ObjectUpdate', 9: 'ObjectDelete',
-         10: 'ObjectRequestOwnership', 11: 'ObjectGrantOwnership', 12: 'ObjectTransferOwnership',
-         13: 'ObjectNeedsUpdates', 14: 'PlayerInput', 15: 'CarPredictionFull', 20: 'MsgBreakGlass', 21: 'MsgCarCollision',
-         22: 'MsgCollObjPos', 23: 'MsgCollObjRest', 24: 'MsgCollObjDetachPart', 25: 'MsgCollObjPosVel', 34: 'FinaliseSessionEntry',
-         59: 'RequestLeaderChange', 60: 'DropLeadership',
-         35: 'MsgRepairDamage', 71: 'ServerTrafficMessage', 72: 'ClientTrafficMessage'}
+# Message ids are the order of the game's message table (names at 1422E4470).
+NAMES = dict(enumerate([
+    'OpenConnection', 'OpenConnectionResponse', 'CloseConnection', 'Ping', 'Pong', 'TimeSync', 'ConnectionSyncDone',
+    'ObjectCreate', 'ObjectUpdate', 'ObjectDelete', 'ObjectRequestOwnership', 'ObjectGrantOwnership',
+    'ObjectTransferOwnership', 'ObjectNeedsUpdates', 'PlayerInput', 'CarPredictionFull', 'ServerTrafficFullSync',
+    'ServerTrafficRouteProgressUpdate', 'ClientTrafficFullSync', 'ClientTrafficRouteProgressUpdate', 'MsgBreakGlass',
+    'MsgCarCollision', 'MsgCollObjPos', 'MsgCollObjRest', 'MsgCollObjDetachPart', 'MsgCollObjPosVel',
+    'MsgCarMeetPlayerInviteRequest', 'MsgCarMeetPlayerJoinOrCancelRequest', 'MsgCarMeetLaunchWagerRace',
+    'MsgCarMeetNotifyPendingGameMode', 'MsgCarMeetConfigureGameOptionsForWagerRace',
+    'MsgCarMeetConfiguredGameOptionsForWagerRace', 'MsgCarMeetGameModeSessionReady', 'MsgChatManagement',
+    'FinaliseSessionEntry', 'MsgRepairDamage', 'MsgTagCollision', 'MsgTagBuckets', 'MsgRequestRace', 'MsgStartingGrid',
+    'MsgStartRace', 'MsgReadyRequest', 'MsgReadyRequestResponse', 'MsgInProgressScoreUpdate', 'MsgLapScore',
+    'MsgScoreKeyframe', 'MsgVoteToKick', 'MsgVoteForTrack', 'SelectNextRoadTripEvent', 'SelectedNextRoadTripEvent',
+    'ConfigureGameOptionsForRoadTripEvent', 'ConfiguredGameOptionsForRoadTripEvent', 'SetGroupSatNavEvent',
+    'RequestSendFullWeather', 'FullWeather', 'RequestSendNewAtmosphericData', 'NewAtmosphericData',
+    'RequestSendNewPrecipitationData', 'NewPrecipitationData', 'RequestLeaderChange', 'DropLeadership',
+    'BucketListChallengeStart', 'BucketListChallengeEnded', 'RequestSynchronizeBucketListChallenge',
+    'RequestDesynchronizeBucketListChallenge', 'RespondBucketListPartner', 'BucketListStatusPlayerWaiting',
+    'BucketListStatusChallengeStarted', 'BucketListStatusChallengeEnded', 'MsgDebugLog', 'MsgInactivePlayersPulled',
+    'ServerTrafficMessage', 'ClientTrafficMessage', 'ServerTrafficFullRoute', 'ServerTrafficStationary',
+    'ClientTrafficFullRoute', 'ClientTrafficStationary']))
+FORWARD_UNSEQUENCED = (20, 24)   # broken glass, a part torn off a smashable: passed on to the others like a car
+TRAFFIC = (16, 17, 71, 73, 74)   # the traffic director's messages (Turn 10's server ran it): read, not answered
+SERVER_OWNER = 0                 # owner index of the server's own objects in Peer.out_seq (consoles are 1..)
+WEATHER_MIN_MS, WEATHER_MAX_MS = 60_000, 20 * 60_000   # how soon / late the server asks for the next weather
 OWN_ATTEMPT = 1
 SESSION_HOST = (6, 0)        # router, object id of the server's SessionHost
 QUIET_DROP_S = 15
@@ -72,6 +90,7 @@ class Peer:
         self.last_seen = time.monotonic()
         self.cars = 0
         self.collisions = 0
+        self.traffic = 0
 
 
 class Relay:
@@ -92,6 +111,9 @@ class Relay:
         self.streams = {}                    # (owner, router, id) -> {'next': seq, 'pending': {seq: (msg, o)}}
         self.seen = set()                    # (owner, msg, router, id, seq): consoles resend unacked messages
         self.leader = None                   # peer index of the session leader
+        self.weather = None                  # the session's WeatherSynced vars (nerd.weather_vars), once known
+        self.weather_asked = None            # when (now) a console was last asked for its full weather
+        self.next_weather = {}               # 'a' / 'p' -> when to ask for new atmosphere / precipitation data
         self.n = 0
         print(f'fh2srv game UDP (relay) on [{host}]:{port}' + (f', leader: player {leader_xuid} when present' if leader_xuid else ''), flush=True)
 
@@ -173,6 +195,21 @@ class Relay:
         if peer.index == self.leader:
             self.leader = None
         self.update_leader()
+        if not self.peers:                   # the session is over: the next one gets its own weather
+            self.weather, self.weather_asked, self.next_weather = None, None, {}
+
+    def delete_object(self, peer, router, id):
+        """A console deleted one of its objects: it goes from the history and from the others."""
+        key = (peer.index, router, id)
+        self.history = [h for h in self.history if not (h[0] == peer.index and h[2]['router'] == router and h[2]['id'] == id)]
+        self.streams.pop(key, None)
+        self.seen = {k for k in self.seen if not (k[0] == peer.index and k[2] == router and k[3] == id)}
+        peer.objects.pop((router, id), None)
+        if router == nerd.PLAYER_ROUTER and id == peer.player_id:
+            peer.player_id = None
+        for p in self.others(peer):
+            if key in p.out_seq:
+                self.send_all(p, [nerd.object_delete(router, id, (p.out_seq.pop(key) + 1) % 255, peer=peer.index)])
 
     def server_var(self, peer, router, id, payload):
         """A server update of server vars on one of the peer's own objects."""
@@ -242,6 +279,93 @@ class Relay:
         self.update_leader()
         return f'-> leader peer {target}'
 
+    # ---- the server's own objects and the weather ---------------------------------------------------------------
+
+    def server_object(self, to, msg, router, id, payload, only_new=False):
+        """The server's object as an ObjectCreate/ObjectUpdate for `to` (handle flags 0, 0: the sender's own)."""
+        key = (SERVER_OWNER, router, id)
+        if msg == 7:
+            if only_new and key in to.out_seq:
+                return None
+            seq = 0
+        elif key not in to.out_seq:
+            return None                      # `to` hasn't got the object yet: its create will carry the values
+        else:
+            seq = (to.out_seq[key] + 1) % 255
+        to.out_seq[key] = seq
+        return nerd.object_msg(msg, router, id, seq, payload)
+
+    def ask_full_weather(self, peer):
+        self.weather_asked = self.now()
+        self.send(peer, [nerd.BitWriter().bits(nerd.REQUEST_FULL_WEATHER, 7)], sequenced=True)
+        print(f'{time.strftime("%H:%M:%S")} weather: asked peer {peer.index} for its weather', flush=True)
+
+    def weather_ms(self, ms, hold):
+        return int(min(max(ms + hold, WEATHER_MIN_MS), WEATHER_MAX_MS))
+
+    def weather_now(self, part):
+        """The intensity the consoles show now, as they work it out (1406F0CB0)."""
+        w, now = self.weather, self.now()
+        c, ct, d, dt = (w[part + '_cur'], w[part + '_cur_tick'], w[part + '_des'], w[part + '_des_tick'])
+        t = 0.0 if now <= ct else 1.0 if now >= dt else (now - ct) / (dt - ct)
+        return c + (d - c) * t
+
+    def send_weather(self, only=None):
+        payload = nerd.weather_vars(self.weather, only)
+        for p in self.peers.values():
+            if p.synced:
+                m = self.server_object(p, 7 if only is None else 8, nerd.WEATHER_ROUTER, 0, payload, only_new=True)
+                if m is None and only is not None:      # a console that joined before there was weather
+                    m = self.server_object(p, 7, nerd.WEATHER_ROUTER, 0, nerd.weather_vars(self.weather), only_new=True)
+                if m is not None:
+                    self.send_all(p, [m])
+
+    def on_weather(self, peer, msg, fields):
+        now = self.now()
+        if msg == nerd.FULL_WEATHER:
+            a, p = nerd.read_atmosphere(fields[0][2]), nerd.read_precipitation(fields[1][2])
+            print(f'{time.strftime("%H:%M:%S")} weather from peer {peer.index}: atmosphere {a}, now {fields[2][2]}; '
+                  f'precipitation {p}, now {fields[3][2]}', flush=True)
+            if self.weather is not None:
+                return 'FullWeather (already have the weather)'
+            # Everyone starts at the sending console's targets (its own weather jumps there too).
+            self.weather = dict(a_cur=a['target'], a_cur_tick=now, a_des=a['target'], a_des_tick=now,
+                                presets=a['presets'], p_cur=p['target'], p_cur_tick=now, p_des=p['target'], p_des_tick=now)
+            self.next_weather = {'a': now + self.weather_ms(a['ms'], a['hold']), 'p': now + self.weather_ms(p['ms'], p['hold'])}
+            self.send_weather()
+            return 'FullWeather -> the session weather'
+        w = self.weather
+        if w is None:
+            return f'{NAMES[msg]} (no session weather yet)'
+        if msg == nerd.ATMOSPHERE:
+            a = nerd.read_atmosphere(fields[0][2])
+            w.update(a_cur=self.weather_now('a'), a_cur_tick=now, a_des=a['target'],
+                     a_des_tick=now + max(int(a['ms']), 0), presets=a['presets'])
+            self.next_weather['a'] = now + self.weather_ms(a['ms'], a['hold'])
+            self.send_weather(only={0, 1, 2, 3, 4})
+            return f'NewAtmosphericData {a}'
+        p = nerd.read_precipitation(fields[0][2])
+        w.update(p_cur=self.weather_now('p'), p_cur_tick=now, p_des=p['target'], p_des_tick=now + max(int(p['ms']), 0))
+        self.next_weather['p'] = now + self.weather_ms(p['ms'], p['hold'])
+        self.send_weather(only={5, 6, 7, 8})
+        return f'NewPrecipitationData {p}'
+
+    def weather_tick(self):
+        """Ask the leader (or anyone) for new weather data when it's due."""
+        synced = [p for p in self.peers.values() if p.synced]
+        if not synced:
+            return
+        now = self.now()
+        who = next((p for p in synced if p.index == self.leader), synced[0])
+        if self.weather is None:
+            if self.weather_asked is None or now - self.weather_asked > 10_000:
+                self.ask_full_weather(who)
+            return
+        for part, req in (('a', nerd.REQUEST_ATMOSPHERE), ('p', nerd.REQUEST_PRECIPITATION)):
+            if now >= self.next_weather.get(part, now + 1):
+                self.next_weather[part] = now + 30_000      # asked again if no answer comes
+                self.send(who, [nerd.BitWriter().bits(req, 7)], sequenced=True)
+
     # ---- the handshake and packets ------------------------------------------------------------------------------
 
     def on_synced(self, peer):
@@ -250,10 +374,14 @@ class Relay:
         self.send(peer, [nerd.time_sync(peer.sync_index, self.now()), nerd.sync_done(OWN_ATTEMPT)])
         peer.sync_index += 1
         world = [nerd.object_msg(7, SESSION_HOST[0], SESSION_HOST[1], 0, nerd.session_host_vars(), type=0)]
+        if self.weather is not None:
+            world.append(self.server_object(peer, 7, nerd.WEATHER_ROUTER, 0, nerd.weather_vars(self.weather)))
         for owner, msg, o in self.history:
             world.append(self.relayed(peer, owner, msg, o['router'], o['id'], o['payload'], o.get('type', 0), o['seq']))
         self.send_all(peer, world)
         self.show_leader(peer)
+        if self.weather is None and (self.weather_asked is None or self.now() - self.weather_asked > 10_000):
+            self.ask_full_weather(peer)      # the first console's weather becomes the session's
         return len(world)
 
     def handle_for(self, h, owner, to):
@@ -362,6 +490,22 @@ class Relay:
                     peer.finalised = True
                     out_seq.append(self.set_console_var(peer, nerd.CONSOLE_SESSION_ENTRY_FINALISED, True))
                     notes.append('-> SessionEntryFinalised')
+            elif msg == 9:
+                d = nerd.read_delete(r)
+                notes.append(f'{name} router {d["router"]} id {d["id"]} seq {d["seq"]}')
+                self.delete_object(peer, d['router'], d['id'])
+            elif msg in nerd.MSG_FORMATS:
+                fields = nerd.read_fields(r, nerd.MSG_FORMATS[msg])
+                if msg in FORWARD_UNSEQUENCED:
+                    unseq.append(('fields', msg, fields))
+                    notes.append(name)
+                elif msg in (nerd.FULL_WEATHER, nerd.ATMOSPHERE, nerd.PRECIPITATION):
+                    notes.append(self.on_weather(peer, msg, fields))
+                elif msg in TRAFFIC:
+                    peer.traffic += 1
+                    notes.append(name)
+                else:
+                    notes.append(f'{name} (not handled)')
             elif msg == 59:
                 h = nerd.read_leader_change(r)
                 target = peer.index if not h['b'] else h.get('peer')
@@ -386,6 +530,10 @@ class Relay:
                 for kind, h, body in unseq:
                     if kind == 'car':
                         msgs.append(nerd.car_msg(h['id'], body, peer=peer.index))
+                    elif kind == 'fields':            # h: the message id, body: its fields
+                        fields = [f if f[0] != 'h' else ('h', f[1], self.handle_for(f[2], peer, p)) for f in body]
+                        if all(f[0] != 'h' or f[2] is not None for f in fields):
+                            msgs.append(nerd.write_fields(h, fields))
                     else:
                         th = self.handle_for(h, peer, p)
                         if th is not None:
@@ -453,6 +601,7 @@ class Relay:
                         self.drop(p, f'quiet for {QUIET_DROP_S} s')
                     elif p.synced:
                         self.send(p, [nerd.ping(self.now())])
+                self.weather_tick()
 
 
 def start(out_dir, lock, port=5101, host='::', mirror=None, leader_xuid=None):

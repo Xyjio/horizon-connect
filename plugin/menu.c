@@ -88,7 +88,7 @@ static void menu_key_load(void) {
 
 enum { PAGE_NONE, PAGE_LIST, PAGE_EDIT, PAGE_HOST, PAGE_JOIN };
 enum { ROW_OWN, ROW_SERVER, ROW_ADD, ROW_HOST, ROW_NAME, ROW_ADDRESS, ROW_SAVE, ROW_CANCEL, ROW_DELETE,
-       ROW_STATUS, ROW_HOSTADDR, ROW_HOSTTOGGLE, ROW_OWNNAME, ROW_SETUP, ROW_HOSTJOIN, ROW_EMPTY };
+       ROW_STATUS, ROW_HOSTADDR, ROW_HOSTTOGGLE, ROW_OWNNAME, ROW_SETUP, ROW_HOSTJOIN, ROW_EMPTY, ROW_UPDATE };
 
 typedef struct { wchar_t name[64], address[128]; } Server;
 static Server g_servers[MAX_SERVERS];
@@ -437,6 +437,7 @@ static void row_text(int i, wchar_t *out, int n) {
   case ROW_HOSTADDR: _snwprintf(out, n, L"%ls", g_hostAddress[0] ? g_hostAddress : L"—"); break;
   case ROW_HOSTTOGGLE: _snwprintf(out, n, L"%ls", g_hostState == 3 ? TR(L"A: beenden", L"A: stop") : g_hostState > 0 ? host_state_text() : TR(L"läuft nicht", L"not running")); break;
   case ROW_OWNNAME: _snwprintf(out, n, L"%ls", g_ownName); break;
+  case ROW_UPDATE: _snwprintf(out, n, L"%ls", TR(L"A: Download-Seite öffnen", L"A: open the download page")); break;
   default: _snwprintf(out, n, L" ");
   }
 }
@@ -561,6 +562,13 @@ static int open_page(void *pause, int kind) {
   wchar_t text[700];
   if (kind == PAGE_LIST) {
     servers_load();
+    if (g_newVersion[0]) {
+      wchar_t label[96];
+      _snwprintf(label, 96, TR(L"Neue Version %hs verfügbar", L"New version %hs available"), g_newVersion);
+      _snwprintf(text, 700, TR(L"Horizon Connect %hs ist erschienen (du hast " HC_VERSION_W L"). A öffnet die Download-Seite im Browser; zurück ins Spiel mit Alt+Tab. Zum Aktualisieren den Ordner „Horizon Connect“ in deinem mods-Ordner durch den aus der ZIP ersetzen.",
+                               L"Horizon Connect %hs is out (you have " HC_VERSION_W L"). A opens the download page in your browser; back to the game with Alt+Tab. To update, replace the \"Horizon Connect\" folder in your mods folder with the one from the ZIP."), g_newVersion);
+      add_row(rows, &n, ROW_UPDATE, -1, label, text);
+    }
     g_pingAt = 0; ping_servers();
     for (int i = 0; i < g_serverCount; i++) {
       _snwprintf(text, 700, TR(L"Adresse: %ls\nA: beitreten   X: bearbeiten   Y: löschen",
@@ -692,6 +700,7 @@ static void action_a(int row) {
   }
   case ROW_ADD: case ROW_EMPTY: open_add(); break;
   case ROW_HOST: close_page(PAGE_HOST); break;
+  case ROW_UPDATE: ShellExecuteW(NULL, L"open", g_newUrl, NULL, NULL, SW_SHOWNORMAL); say(row, TR(L"Im Browser geöffnet (Alt+Tab)", L"Opened in your browser (Alt+Tab)")); break;
   case ROW_NAME: { wchar_t t[64]; clip_text(t, 41); if (t[0]) wcscpy(g_editName, t); else say(row, TR(L"Zwischenablage ist leer", L"Clipboard is empty")); break; }
   case ROW_ADDRESS: {
     wchar_t t[128], host[256]; int port;

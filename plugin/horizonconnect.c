@@ -661,7 +661,8 @@ static DWORD WINAPI worker(LPVOID p) {
 //    azimuth-tls.dll to stand in for any more (it loads azimuth-tls-1.dll, -2.dll as TLS slot modules), so
 //    Extra Options loads this DLL with its other plugins, on its loader thread, at the game's first file lookup.
 //    Then DllMain does nothing and FH2PluginInitialize starts it.
-#define HC_VERSION "1.0.2"
+#define HC_VERSION "1.0.3"
+#define HC_VERSION_W L"1.0.3"
 static int g_pluginMode;
 
 // Azimuth's folder (where azimuth.exe is), with a trailing backslash.
@@ -783,6 +784,8 @@ static void apply_join(void) {
 
 #include <wincrypt.h>
 #include <wctype.h>
+#include <ctype.h>
+#include <stdlib.h>
 #include "online.c"
 #include "menu.c"
 
