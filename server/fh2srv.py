@@ -14,7 +14,8 @@ import relay, xls
 ap = argparse.ArgumentParser()
 ap.add_argument('--port', type=int, default=8090)
 ap.add_argument('--host', default='127.0.0.1', help='HTTP address to listen on; 0.0.0.0 for consoles on the LAN')
-ap.add_argument('--game-port', type=int, default=5101, help="the relay's UDP port (all addresses, IPv4 and IPv6)")
+ap.add_argument('--game-port', type=int, default=5101, help="the relay's UDP port")
+ap.add_argument('--game-host', default='127.0.0.1', help="the relay's address: 127.0.0.1 (this PC and the playit agent) or :: (also the LAN)")
 ap.add_argument('--mirror', type=float, help='testing alone: send each console itself back as a ghost player, its car this many seconds late')
 ap.add_argument('--start-hour', type=float, default=10.0, help='time of day (0-24) when the server starts; a game day lasts 30 minutes')
 ap.add_argument('--leader-xuid', type=int, help="the host's player id: its console is the session leader (crown) when it joins")
@@ -331,7 +332,30 @@ def gsms(method, path, body):
 
 
 DEFAULT_XUID = '2533274790395904'   # Azimuth's
-GAMERTAGS = {}                       # xuid -> gamertag, from the consoles' X-Horizon-* headers
+GAMERTAGS = {}                       # xuid -> gamertag, from the consoles' X-Horizon-* headers and the relays
+NAMES_ASKED = {}                     # relay address -> when it was last asked for names
+
+
+def relay_names(relay_addr):
+    """The gamertags the relay this console plays on knows (FH2N?), into GAMERTAGS. At most once a second."""
+    import socket, time
+    if not relay_addr or time.monotonic() - NAMES_ASKED.get(relay_addr, -10) < 1:
+        return
+    NAMES_ASKED[relay_addr] = time.monotonic()
+    host, _, port = relay_addr.rpartition(':')
+    host = host.strip('[]')
+    try:
+        info = socket.getaddrinfo(host, int(port), type=socket.SOCK_DGRAM)[0]
+        with socket.socket(info[0], socket.SOCK_DGRAM) as s:
+            s.settimeout(0.5)
+            s.sendto(b'FH2N?', info[4])
+            data, _ = s.recvfrom(2048)
+        if data.startswith(b'FH2N!'):
+            for uid, tag in json.loads(data[5:]).items():
+                if isinstance(tag, str) and tag:
+                    GAMERTAGS[str(uid)] = tag[:32]
+    except (OSError, ValueError) as e:
+        print(f'names from the relay {relay_addr}: {e}', flush=True)
 
 
 def mpsd_sessions(method, path, body, xuid=DEFAULT_XUID, gamertag='Player 1'):
@@ -388,7 +412,7 @@ def mpsd_sessions(method, path, body, xuid=DEFAULT_XUID, gamertag='Player 1'):
         return (201 if new else 200), doc
 
 
-def profile(method, path, body, xuid=DEFAULT_XUID, gamertag='Player 1'):
+def profile(method, path, body, xuid=DEFAULT_XUID, gamertag='Player 1', relay_addr=None):
     # Profile settings (XSAPI ProfileService): POST /users/batch/profile/settings {userIds, settings} answers
     # every user asked for; GET /users/me/profile/settings/people/People (the friends' profiles) answers none.
     p = path.split('?')[0]
@@ -397,6 +421,8 @@ def profile(method, path, body, xuid=DEFAULT_XUID, gamertag='Player 1'):
     if method != 'POST' or not p.endswith('/batch/profile/settings'): return 503, None
     req = json.loads(body or b'{}')
     users = []
+    if any(str(uid) != xuid and str(uid) not in GAMERTAGS for uid in req.get('userIds', [])):
+        relay_names(relay_addr)
     for uid in req.get('userIds', []):
         tag = gamertag if uid == xuid else GAMERTAGS.get(uid, f'Driver {str(uid)[-4:]}')
         # The picture settings must be URLs: XSAPI makes a Uri of each, and the game (14124D790) reads the
@@ -462,7 +488,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         xuid = self.headers.get('X-Horizon-Xuid', DEFAULT_XUID)
                         gamertag = self.headers.get('X-Horizon-Gamertag', 'Player 1')
                         GAMERTAGS[xuid] = gamertag
-                        st, obj = fn(self.command, self.path, body, xuid, gamertag)
+                        if fn is profile:     # the relay this console plays on knows the others' names
+                            st, obj = fn(self.command, self.path, body, xuid, gamertag, self.headers.get('X-Horizon-Relay'))
+                        else:
+                            st, obj = fn(self.command, self.path, body, xuid, gamertag)
                     else:
                         st, obj = fn(self.command, self.path, body)
                     if obj is not None:
@@ -485,6 +514,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
 
-relay.start(args.out, lock, args.game_port, mirror=args.mirror, leader_xuid=args.leader_xuid, start_hour=args.start_hour)
+relay.start(args.out, lock, args.game_port, host=args.game_host, mirror=args.mirror, leader_xuid=args.leader_xuid, start_hour=args.start_hour)
 print(f'fh2srv listening on {args.host}:{args.port}, captures in {args.out}', flush=True)
 http.server.ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()

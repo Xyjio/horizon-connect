@@ -136,6 +136,10 @@ static int online_set_join(const wchar_t *address) {
   return 1;
 }
 
+static void relay_where(wchar_t *out, int len) {
+  _snwprintf(out, len, L"[%ls]:%d", g_serverIp6[0] ? g_serverIp6 : L"127.0.0.1", g_serverPort ? g_serverPort : g_localPort);
+}
+
 static int clipboard_set(const wchar_t *text) {
   if (!OpenClipboard(NULL)) return 0;
   EmptyClipboard();
@@ -172,8 +176,11 @@ static void start_local_server(void) {
   _snwprintf(srv, MAX_PATH, L"%lsserver", g_onlineDir);
   if (GetFileAttributesW(py) == INVALID_FILE_ATTRIBUTES) { logf("online: %ls is missing; no local server", py); return; }
   // --leader-xuid: when this PC hosts, its own player gets the crown (session leader)
-  _snwprintf(cmd, 4 * MAX_PATH, L"\"%ls\" -I -u \"%ls\\run_server.py\" --game \"%ls\" --port %d --game-port %d --leader-xuid %llu",
-             py, srv, game, g_localPort, g_localPort, wcstoull(g_xuid, NULL, 10));
+  // [online] OpenToLan=1: the relay also takes consoles from the LAN (by this PC's address); otherwise only this PC
+  // and the playit agent reach it
+  int lan = GetPrivateProfileIntW(L"online", L"OpenToLan", 0, g_ini);
+  _snwprintf(cmd, 4 * MAX_PATH, L"\"%ls\" -I -u \"%ls\\run_server.py\" --game \"%ls\" --port %d --game-port %d --game-host %ls --leader-xuid %llu",
+             py, srv, game, g_localPort, g_localPort, lan ? L"::" : L"127.0.0.1", wcstoull(g_xuid, NULL, 10));
   HANDLE p = spawn_hidden(cmd, srv, L"local server");
   if (p) CloseHandle(p);
 }
@@ -338,11 +345,18 @@ static void update_cleanup(void) {
 
 // ---- restarting the game (after an update) -------------------------------------------------------------------------
 // server\restart.py waits until this process has ended and starts Azimuth again straight into the game
-// (--skip-launcher --game=<title>). The game is asked to close like with its window's X; if it is still there
-// after 8 s it is ended.
+// (--skip-launcher --game=<title>). The game is asked to close like with its window's X. It is only ended by force
+// when its windows are gone but the process hangs on (20 s): while a window is still open (a question, the game
+// saving) nothing is forced - the player closes it, and restart.py waits up to 10 minutes.
 static BOOL CALLBACK close_own_window(HWND w, LPARAM pid) {
   DWORD p = 0; GetWindowThreadProcessId(w, &p);
   if (p == (DWORD)pid && IsWindowVisible(w) && !GetWindow(w, GW_OWNER)) PostMessageW(w, WM_CLOSE, 0, 0);
+  return TRUE;
+}
+
+static BOOL CALLBACK count_own_window(HWND w, LPARAM out) {
+  DWORD p = 0; GetWindowThreadProcessId(w, &p);
+  if (p == GetCurrentProcessId() && IsWindowVisible(w)) ++*(int *)out;
   return TRUE;
 }
 
@@ -350,8 +364,12 @@ static DWORD WINAPI restart_thread(LPVOID unused) {
   (void)unused;
   Sleep(800);                                 // the menu shows "Restarting…" first
   EnumWindows(close_own_window, (LPARAM)GetCurrentProcessId());
-  Sleep(8000);
-  logf("restart: the game didn't close; ending it");
+  for (int gone = 0;; Sleep(1000)) {
+    int open = 0; EnumWindows(count_own_window, (LPARAM)&open);
+    gone = open ? 0 : gone + 1;
+    if (gone >= 20) break;
+  }
+  logf("restart: the game's windows are closed but it hangs on; ending it");
   TerminateProcess(GetCurrentProcess(), 0);
   return 0;
 }

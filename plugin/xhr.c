@@ -13,6 +13,7 @@ static wchar_t g_httpServer[256];       // [http] Server, e.g. http://127.0.0.1:
 static wchar_t g_srvHost[128]; static INTERNET_PORT g_srvPort; static int g_srvTls;
 static wchar_t g_xuid[32];               // [xbl] Xuid (default Azimuth's 2533274790395904)
 static wchar_t g_gamertag[64];           // [xbl] Gamertag, else Azimuth's player_name (data\azimuth.ini)
+static void relay_where(wchar_t *out, int len);   // online.c: "[address]:port" of the relay this console uses
 static HINTERNET g_winhttp;
 static volatile LONG g_reqSeq;
 typedef void *(WINAPI *CoTaskMemAlloc_t)(SIZE_T);
@@ -150,8 +151,10 @@ static DWORD WINAPI x_run(LPVOID param) {
   if (!r) { fail(x, HRESULT_FROM_WIN32(GetLastError()), "connect"); goto done; }
   // Who is asking: fh2srv writes session members and profile names from these (every console's Xbox Live
   // token is the same made-up one).
-  wchar_t fwd[512]; swprintf(fwd, 512, L"X-Horizon-Host: %ls\r\nX-Horizon-Scheme: %ls\r\nX-Horizon-Xuid: %ls\r\nX-Horizon-Gamertag: %ls\r\n",
-                             host, scheme, g_xuid, g_gamertag);
+  // X-Horizon-Relay: where fh2srv asks for the other players' gamertags.
+  wchar_t relay[96]; relay_where(relay, 96);
+  wchar_t fwd[640]; swprintf(fwd, 640, L"X-Horizon-Host: %ls\r\nX-Horizon-Scheme: %ls\r\nX-Horizon-Xuid: %ls\r\nX-Horizon-Gamertag: %ls\r\nX-Horizon-Relay: %ls\r\n",
+                             host, scheme, g_xuid, g_gamertag, relay);
   WinHttpAddRequestHeaders(r, fwd, (DWORD)-1L, WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
   if (x->headersLen) WinHttpAddRequestHeaders(r, x->headers, (DWORD)x->headersLen, WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
   if (!WinHttpSendRequest(r, WINHTTP_NO_ADDITIONAL_HEADERS, 0, x->body, x->bodyLen, x->bodyLen, 0) || !WinHttpReceiveResponse(r, NULL)) {
