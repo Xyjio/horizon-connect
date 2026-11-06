@@ -22,16 +22,25 @@ console that has been in the session longest; it passes on when the leader leave
 (RequestLeaderChange) or gives it up (DropLeadership). Each console gets IsLeader on its own PlayerData as a
 server update and on everyone else's PlayerData as a relayed update.
 
+Names: the gamertag in each console's PlayerData (NetworkName) is kept, and "FH2N?" is answered with
+FH2N!{xuid: gamertag}. Every player's own local server asks this when the game wants another player's
+profile (fh2srv.py), since it only knows its own player's name.
+
 Testing alone (fh2srv --mirror <seconds>): each console also gets its own objects back as another player's
 (peer 250), and its car that many seconds late - a ghost of itself to show that car sync works.
 
 A console that starts over (an OpenConnection in packet 0: a new launch), goes quiet for 15 s or closes the
 connection is dropped: the others get an ObjectDelete for each of its objects.
 
+Reliability: the relay's sequenced packets (objects, server updates, deletes, requests) are kept until the
+console acks them (packet header: newest id + 32 bits for the ids before it) and sent again in a new packet
+after RESEND_S - a console takes each object's updates strictly in order, so one lost packet would otherwise
+stall that object for good. A message nobody acks is given up after RESEND_GIVE_UP_S.
+
 Game messages carry no length, so a packet is read only as far as its messages are understood; the rest of it
 is logged and dropped (the packet is still acked).
 """
-import itertools, json, os, socket, threading, time
+import itertools, json, math, os, socket, threading, time
 
 import nerd
 
@@ -63,9 +72,15 @@ SERVER_OWNER = 0                 # owner index of the server's own objects in Pe
 # server ms / 1000 * 48 mod 86400, so a game day lasts 30 minutes. The clock starts at start_hour.
 TOD_SCALE = 48
 WEATHER_MIN_MS, WEATHER_MAX_MS = 60_000, 20 * 60_000   # how soon / late the server asks for the next weather
+RESEND_S = 0.4                   # an unacked sequenced packet's messages go again after this long
+RESEND_GIVE_UP_S = 12.0          # ... until this long after they were first sent
+# What one console may leave in the history (replayed to everyone who joins later). A console sends a few object
+# updates a minute; one that sends this many is broken or hostile and is dropped, so memory stays bounded.
+MAX_HISTORY_PER_PEER = 5000
 OWN_ATTEMPT = 1
 SESSION_HOST = (6, 0)        # router, object id of the server's SessionHost
 QUIET_DROP_S = 15
+MAX_PACKET = 1500                # the game's packets are at most 1200 bytes; bigger ones aren't read
 MAX_PLAYERS = 12             # FH2's session size (gameServerPlatform maxAllowedPlayers)
 # Peer indexes stay small and are reused: the game keeps per-peer state in a fixed-size table indexed by
 # the 8-bit peer index of a relay handle, so a large index reads past it (crash at game+F842E5 with
@@ -94,16 +109,25 @@ class Peer:
         self.cars = 0
         self.collisions = 0
         self.traffic = 0
+        self.unacked = {}                    # our packet id -> (sent at, first sent at, msgs): waiting for its ack
+        self.resent = 0
+        self.bad = 0                         # packets that couldn't be read
+        self.kept = 0                        # its entries in the relay's history
 
 
 class Relay:
-    def __init__(self, out_dir, lock, port=5101, host='::', mirror=None, leader_xuid=None, start_hour=10.0):
+    def __init__(self, out_dir, lock, port=5101, host='127.0.0.1', mirror=None, leader_xuid=None, start_hour=10.0):
         self.out_dir, self.lock = out_dir, lock
         self.mirror = mirror                 # seconds: each console also gets itself back as a ghost player
         self.leader_xuid = leader_xuid       # the host's player id: its console takes the crown when it joins
         self.delayed = []                    # (due, peer, msgs) for the mirror's cars
-        self.sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-        self.sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)   # IPv4 consoles too (as ::ffff:a.b.c.d)
+        # host '127.0.0.1' (the default): only this PC - its own console and the playit agent, which brings the
+        # friends' packets from 127.x addresses. '::' (LAN play): every address, IPv4 too (as ::ffff:a.b.c.d).
+        if ':' in host:
+            self.sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+            self.sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        else:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind((host, port))
         self.mu = threading.RLock()
         self.t0 = time.monotonic() - (start_hour % 24) * 3600 / TOD_SCALE   # server clock at start: start_hour o'clock
@@ -119,20 +143,50 @@ class Relay:
         self.next_weather = {}               # 'a' / 'p' -> when to ask for new atmosphere / precipitation data
         self.n = 0
         self.strangers = 0                   # packets from addresses that aren't consoles (ignored)
+        self.names = {}                      # xuid (text) -> gamertag, from the consoles' PlayerData
         print(f'fh2srv game UDP (relay) on [{host}]:{port}' + (f', leader: player {leader_xuid} when present' if leader_xuid else ''), flush=True)
 
     def now(self):
         return int((time.monotonic() - self.t0) * 1000) + 1
 
-    def send(self, peer, msgs, sequenced=False):
+    def send(self, peer, msgs, sequenced=False, first=None):
         ack, ackbits = peer.acks.header()
-        pid = next(peer.seq) & 0xFFFF if sequenced else nerd.NO_SEQ
+        pid = nerd.NO_SEQ
+        if sequenced:
+            pid = next(peer.seq) & 0xFFFF
+            while pid >= 0xFFFE:             # 0xFFFF means "no sequence"; 0xFFFE is the "nothing acked yet" ack
+                pid = next(peer.seq) & 0xFFFF
+            now = time.monotonic()
+            peer.unacked[pid] = (now, first if first is not None else now, list(msgs))
         data = nerd.packet(nerd.concat(*msgs), count=len(msgs), pid=pid, ack=ack, ackbits=ackbits)
         try:
             self.sock.sendto(data, peer.addr)
         except OSError:
             pass
         return data
+
+    def on_acks(self, peer, ack, ackbits):
+        """The console's packet header acks our packet `ack` and, in `ackbits`, the 32 before it."""
+        if not peer.unacked or ack >= 0xFFFE:
+            return
+        peer.unacked.pop(ack, None)
+        for n in range(1, 33):
+            if ackbits >> (n - 1) & 1:
+                peer.unacked.pop((ack - n) & 0xFFFF, None)
+
+    def resend(self, peer):
+        """Unacked sequenced packets: their messages again, in a new packet (each object's seq makes the copy
+        harmless if the first one did arrive)."""
+        now = time.monotonic()
+        for pid, (sent, first, msgs) in list(peer.unacked.items()):
+            if now - sent < RESEND_S:
+                continue
+            del peer.unacked[pid]
+            if now - first > RESEND_GIVE_UP_S:
+                print(f'{time.strftime("%H:%M:%S")} peer {peer.index}: {len(msgs)} messages never acked; given up', flush=True)
+                continue
+            peer.resent += 1
+            self.send(peer, msgs, sequenced=True, first=first)
 
     def send_all(self, peer, msgs, sequenced=True):
         for i in range(0, len(msgs), 8):     # a few messages per packet, well under the packet size limit
@@ -206,6 +260,7 @@ class Relay:
         """A console deleted one of its objects: it goes from the history and from the others."""
         key = (peer.index, router, id)
         self.history = [h for h in self.history if not (h[0] == peer.index and h[2]['router'] == router and h[2]['id'] == id)]
+        peer.kept = sum(1 for h in self.history if h[0] == peer.index)
         self.streams.pop(key, None)
         self.seen = {k for k in self.seen if not (k[0] == peer.index and k[2] == router and k[3] == id)}
         peer.objects.pop((router, id), None)
@@ -324,10 +379,24 @@ class Relay:
                 if m is not None:
                     self.send_all(p, [m])
 
+    @staticmethod
+    def weather_ok(part):
+        """Values every console can use: finite numbers in sane ranges, preset indexes the game's tables have
+        (a console uses them as indexes; seen: 0..8)."""
+        nums = (part['target'], part['ms'], part['hold'])
+        return (all(math.isfinite(x) for x in nums) and -10 <= part['target'] <= 10
+                and 0 <= part['ms'] <= 1e8 and 0 <= part['hold'] <= 1e8
+                and all(0 <= x < 64 for x in part.get('presets', [])))
+
     def on_weather(self, peer, msg, fields):
         now = self.now()
+        parts = [nerd.read_atmosphere(fields[0][2]) if msg != nerd.PRECIPITATION else nerd.read_precipitation(fields[0][2])]
         if msg == nerd.FULL_WEATHER:
-            a, p = nerd.read_atmosphere(fields[0][2]), nerd.read_precipitation(fields[1][2])
+            parts.append(nerd.read_precipitation(fields[1][2]))
+        if not all(self.weather_ok(x) for x in parts):
+            return f'{NAMES[msg]} {parts} (not usable: ignored)'
+        if msg == nerd.FULL_WEATHER:
+            a, p = parts
             print(f'{time.strftime("%H:%M:%S")} weather from peer {peer.index}: atmosphere {a}, now {fields[2][2]}; '
                   f'precipitation {p}, now {fields[3][2]}', flush=True)
             if self.weather is not None:
@@ -342,13 +411,13 @@ class Relay:
         if w is None:
             return f'{NAMES[msg]} (no session weather yet)'
         if msg == nerd.ATMOSPHERE:
-            a = nerd.read_atmosphere(fields[0][2])
+            a = parts[0]
             w.update(a_cur=self.weather_now('a'), a_cur_tick=now, a_des=a['target'],
                      a_des_tick=now + max(int(a['ms']), 0), presets=a['presets'])
             self.next_weather['a'] = now + self.weather_ms(a['ms'], a['hold'])
             self.send_weather(only={0, 1, 2, 3, 4})
             return f'NewAtmosphericData {a}'
-        p = nerd.read_precipitation(fields[0][2])
+        p = parts[0]
         w.update(p_cur=self.weather_now('p'), p_cur_tick=now, p_des=p['target'], p_des_tick=now + max(int(p['ms']), 0))
         self.next_weather['p'] = now + self.weather_ms(p['ms'], p['hold'])
         self.send_weather(only={5, 6, 7, 8})
@@ -442,7 +511,23 @@ class Relay:
         out, notes, ready, out_seq, unseq, seqd, mirror_objs = [], [], [], [], [], [], []
         new_player = False
         peer.acks.add(hdr['id'])
+        self.on_acks(peer, hdr['ack'], hdr['ackbits'])
         notes.append(f'peer {peer.index} id {hdr["id"]} cnt {hdr["count"]}')
+        try:
+            new_player = self.read_messages(peer, hdr, r, data, out, notes, ready, out_seq, unseq, seqd, mirror_objs)
+        except Exception as e:               # a cut-off or malformed packet: keep what was read before it
+            peer.bad += 1
+            notes.append(f'unreadable from here ({type(e).__name__}: {e})')
+        if peer.addr not in self.peers:      # it closed the connection
+            return notes, None
+        if peer.kept > MAX_HISTORY_PER_PEER:
+            self.drop(peer, f'more than {MAX_HISTORY_PER_PEER} object messages')
+            return notes, None
+        return self.pass_on(peer, hdr, out, notes, ready, out_seq, unseq, seqd, mirror_objs, new_player)
+
+    def read_messages(self, peer, hdr, r, data, out, notes, ready, out_seq, unseq, seqd, mirror_objs):
+        """Reads the packet's messages into the lists; returns whether its PlayerData was just made."""
+        new_player = False
         for _ in range(hdr['count']):
             if r.left() < 7:
                 break
@@ -462,7 +547,7 @@ class Relay:
             elif msg == 2:
                 notes.append(name)
                 self.drop(peer, 'closed')
-                return notes, None
+                return False
             elif msg == 3:
                 out.append(nerd.pong(nerd.read_ping(r)['time'], self.now()))
                 notes.append(name)
@@ -475,20 +560,28 @@ class Relay:
                 except ValueError as e:
                     notes.append(f'{name}: {e}; rest not read ({r.left()} bits)')
                     break
+                # A console sends a message again until it is acked. A resent update is caught by in_order (its
+                # seq is behind); a resent create would start the object over, so creates are remembered.
                 key = (peer.index, msg, o['router'], o['id'], o['seq'])
+                again = msg == 7 and key in self.seen
                 notes.append(f'{name} router {o["router"]} id {o["id"]}' + (f' type {o["type"]}' if 'type' in o else '')
-                             + f' seq {o["seq"]} {o["payload"].pos} bits' + (' (resent)' if key in self.seen else ''))
-                if key in self.seen:
+                             + f' seq {o["seq"]} {o["payload"].pos} bits' + (' (resent)' if again else ''))
+                if again:
                     continue
-                self.seen.add(key)
+                if msg == 7:
+                    self.seen.add(key)
                 if msg == 7 and o['router'] == 3:
                     peer.console_id = o['id']
                 if msg == 7 and o['router'] == nerd.PLAYER_ROUTER:
                     peer.player_id, peer.own_leader, new_player = o['id'], None, True
+                    named = nerd.read_player_name(o['payload'])
+                    if named and named[0] and len(self.names) < 256:
+                        self.names[str(named[1])] = named[0][:32]
                     for q in self.peers.values():
                         q.leader_shown.pop(peer.index, None)
                 peer.objects[(o['router'], o['id'])] = o['seq']
                 for m, ro in self.in_order(peer, msg, o):
+                    peer.kept += 1
                     self.history.append((peer.index, m, ro))
                     ready.append((m, ro))
                     mirror_objs.append((m, ro))
@@ -542,6 +635,10 @@ class Relay:
             else:
                 notes.append(f'{name} (+{r.left()} bits, not read)')
                 break
+        return new_player
+
+    def pass_on(self, peer, hdr, out, notes, ready, out_seq, unseq, seqd, mirror_objs, new_player):
+        """Sends on what a packet brought: to the others, and the answers and the ack to the sender."""
         if ready:
             for p in self.others(peer):
                 self.send_all(p, [self.relayed(p, peer.index, m, o['router'], o['id'], o['payload'], o.get('type', 0), o['seq'])
@@ -584,6 +681,14 @@ class Relay:
                 data, addr = self.sock.recvfrom(65536)
             except ConnectionResetError:     # Windows: a send of ours reached a closed port (a console left)
                 continue
+            if data.startswith(b'FH2N?'):    # a local server asks for the players' gamertags
+                with self.mu:
+                    reply = b'FH2N!' + json.dumps(self.names, ensure_ascii=True).encode()
+                try:
+                    self.sock.sendto(reply[:1400], addr)
+                except OSError:
+                    pass
+                continue
             if data.startswith(b'FH2O?'):    # Horizon Connect's server list asks whether this server is up
                 with self.mu:
                     info = {'players': len(self.peers), 'max': MAX_PLAYERS - 1 - (1 if self.mirror is not None else 0)}
@@ -591,6 +696,8 @@ class Relay:
                     self.sock.sendto(b'FH2O!' + json.dumps(info).encode(), addr)
                 except OSError:
                     pass
+                continue
+            if len(data) > MAX_PACKET:
                 continue
             with self.mu:
                 self.n += 1
@@ -629,15 +736,17 @@ class Relay:
                 for p in list(self.peers.values()):
                     if time.monotonic() - p.last_seen > QUIET_DROP_S:
                         self.drop(p, f'quiet for {QUIET_DROP_S} s')
-                    elif p.synced:
-                        self.send(p, [nerd.ping(self.now())])
+                    else:
+                        if p.synced:
+                            self.send(p, [nerd.ping(self.now())])
+                        self.resend(p)
                 try:
                     self.weather_tick()
-                except Exception as e:
+                except Exception as e:           # never let one bad value stop the pings
                     print(f'{time.strftime("%H:%M:%S")} weather: {type(e).__name__}: {e}', flush=True)
 
 
-def start(out_dir, lock, port=5101, host='::', mirror=None, leader_xuid=None, start_hour=10.0):
+def start(out_dir, lock, port=5101, host='127.0.0.1', mirror=None, leader_xuid=None, start_hour=10.0):
     relay = Relay(out_dir, lock, port, host, mirror, leader_xuid, start_hour)
     threading.Thread(target=relay.run, daemon=True).start()
     if mirror is not None:

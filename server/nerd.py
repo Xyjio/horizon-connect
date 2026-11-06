@@ -25,34 +25,40 @@ class BitReader:
         self.data, self.pos = data, pos
 
     def bits(self, n):
-        v = 0
-        for i in range(n):
-            p = self.pos + i
-            v |= ((self.data[p >> 3] >> (p & 7)) & 1) << i
-        self.pos += n
-        return v
+        """The next n bits as an int (whole bytes at a time: a 16000-bit payload is one slice, not a loop)."""
+        end = self.pos + n
+        if end > len(self.data) * 8:
+            raise IndexError('read past the end of the packet')
+        if n == 0:
+            return 0
+        chunk = int.from_bytes(self.data[self.pos >> 3:(end + 7) >> 3], 'little')
+        self.pos = end
+        return (chunk >> ((end - n) & 7)) & ((1 << n) - 1)
 
     def cuint(self):
         return self.bits(8 * self.bits(2) + 6)
 
     def string(self):
-        return bytes(self.bits(8) for _ in range(self.cuint())).decode('latin1')
+        n = self.cuint()
+        return self.bits(8 * n).to_bytes(n, 'little').decode('latin1')
 
     def left(self):
         return len(self.data) * 8 - self.pos
 
 
 class BitWriter:
+    """Bits written LSB first, kept as one int (val) of pos bits; buf is its bytes."""
     def __init__(self):
-        self.buf, self.pos = bytearray(), 0
+        self.val, self.pos = 0, 0
 
     def bits(self, v, n):
-        for i in range(n):
-            if self.pos >> 3 >= len(self.buf):
-                self.buf.append(0)
-            self.buf[self.pos >> 3] |= ((v >> i) & 1) << (self.pos & 7)
-            self.pos += 1
+        self.val |= (v & ((1 << n) - 1)) << self.pos
+        self.pos += n
         return self
+
+    @property
+    def buf(self):
+        return self.val.to_bytes((self.pos + 7) >> 3, 'little')
 
     def cuint(self, v):
         s = 3 if v & 0xFFC00000 else 2 if v & 0xFFC000 else 1 if v & 0xFFC0 else 0
@@ -149,9 +155,7 @@ def read_object(r, msg):
         o['type'] = r.bits(typew)
     o['seq'] = r.bits(8)
     n = r.bits(14)
-    o['payload'] = BitWriter()
-    for _ in range(n):
-        o['payload'].bits(r.bits(1), 1)
+    o['payload'] = BitWriter().bits(r.bits(n), n)
     return o
 
 
@@ -197,10 +201,7 @@ CAR_BODY_BITS = 678 + 32
 
 def read_car(r):
     h = read_handle(r, 7)
-    body = BitWriter()
-    for _ in range(CAR_BODY_BITS):
-        body.bits(r.bits(1), 1)
-    return h, body
+    return h, BitWriter().bits(r.bits(CAR_BODY_BITS), CAR_BODY_BITS)
 
 
 def car_msg(id, body, peer=None):
@@ -273,10 +274,7 @@ COLLISION_BODY_BITS = 192
 
 def read_collision(r):
     h = read_handle(r, 7)
-    body = BitWriter()
-    for _ in range(COLLISION_BODY_BITS):
-        body.bits(r.bits(1), 1)
-    return h, body
+    return h, BitWriter().bits(r.bits(COLLISION_BODY_BITS), COLLISION_BODY_BITS)
 
 
 def handle_msg(msg, h, body=None):
@@ -357,7 +355,7 @@ def read_fields(r, fmt):
             n = r.cuint() if f[0] == 'blob' else r.bits(f[1])
             if n * 8 > r.left():
                 raise ValueError(f'{n} bytes announced, {r.left() // 8} left')
-            out.append((f[0], f[1] if f[0] == 'bytes' else None, bytes(r.bits(8) for _ in range(n))))
+            out.append((f[0], f[1] if f[0] == 'bytes' else None, r.bits(8 * n).to_bytes(n, 'little')))
     return out
 
 
@@ -376,8 +374,7 @@ def write_fields(msg, fields):
                 w.cuint(len(f[2]))
             else:
                 w.bits(len(f[2]), f[1])
-            for c in f[2]:
-                w.bits(c, 8)
+            w.bits(int.from_bytes(f[2], 'little'), 8 * len(f[2]))
     return w
 
 
@@ -456,8 +453,7 @@ def concat(*msgs):
     """Messages follow each other in the bit stream with no length or padding between them."""
     w = BitWriter()
     for m in msgs:
-        for i in range(m.pos):
-            w.bits((m.buf[i >> 3] >> (i & 7)) & 1, 1)
+        w.bits(m.val, m.pos)
     return w
 
 
