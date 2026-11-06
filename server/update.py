@@ -205,11 +205,13 @@ def install(z, mod):
     ini = os.path.join(mod, *INI.split('/'))
     try:
         with open(ini, 'rb') as f:
-            mine = f.read().decode('latin-1')
+            raw = f.read()
+        unicode = raw[:2] == b'\xff\xfe'            # the plugin keeps it as UTF-16 since 1.0.6
+        mine = raw.decode('utf-16') if unicode else raw.decode('latin-1')
         merged, added = merge_ini(mine, z.read(TOP + INI).decode('latin-1'))
         if added:
             with open(ini + '.update-new', 'wb') as f:
-                f.write(merged.encode('latin-1'))
+                f.write(('\ufeff' + merged).encode('utf-16-le') if unicode else merged.encode('latin-1'))
             os.replace(ini + '.update-new', ini)
             log('new settings: ' + ', '.join(added))
     except (OSError, KeyError) as e:

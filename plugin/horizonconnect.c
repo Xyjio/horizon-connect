@@ -697,8 +697,76 @@ static ULONG64 mix64(ULONG64 z) {   // splitmix64
   return z ^ (z >> 31);
 }
 
+// This PC, as a short hash of Windows' MachineGuid ("" if it can't be read). [xbl] Owner keeps the PC the player id
+// was made on: a mod folder copied to a friend's PC (with its HorizonConnect.ini) would otherwise give both the same
+// id - and the same id twice in a session mixes the two players up. Moving the folder on the same PC keeps it.
+static void this_pc(wchar_t *out, int len) {
+  wchar_t guid[64]; DWORD size = sizeof guid;
+  out[0] = 0;
+  if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Cryptography", L"MachineGuid", RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY,
+                   NULL, guid, &size) != ERROR_SUCCESS || !guid[0]) return;
+  ULONG64 h = 0x48434F4E4E454354ULL;   // "HCONNECT"
+  for (const wchar_t *c = guid; *c; c++) h = mix64(h ^ (ULONG64)towlower(*c));
+  _snwprintf(out, len, L"%016llx", h);
+}
+
+// The device address made from a player id: base64 of "horizon-<id>".
+static void device_address(ULONG64 id, wchar_t *out) {
+  char raw[48]; int n = snprintf(raw, sizeof raw, "horizon-%llu", id);
+  static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  int o = 0;
+  for (int i = 0; i < n; i += 3) {
+    unsigned v = (unsigned char)raw[i] << 16 | (i + 1 < n ? (unsigned char)raw[i + 1] << 8 : 0) | (i + 2 < n ? (unsigned char)raw[i + 2] : 0);
+    out[o++] = b64[v >> 18 & 63]; out[o++] = b64[v >> 12 & 63];
+    out[o++] = i + 1 < n ? b64[v >> 6 & 63] : L'='; out[o++] = i + 2 < n ? b64[v & 63] : L'=';
+  }
+  out[o] = 0;
+}
+
+// HorizonConnect.ini as UTF-16 (with a BOM): Windows then keeps any character the player uses (server names, the
+// gamertag) - in the shipped ANSI file, WritePrivateProfileString turns everything outside the code page into "?".
+// Converted once, from the system's ANSI code page.
+static void ini_unicode(void) {
+  HANDLE f = CreateFileW(g_ini, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+  if (f == INVALID_HANDLE_VALUE) return;
+  DWORD size = GetFileSize(f, NULL), got = 0;
+  char *raw = size != INVALID_FILE_SIZE && size < (1 << 20) ? malloc(size + 1) : NULL;
+  int ok = raw && ReadFile(f, raw, size, &got, NULL) && got == size;
+  CloseHandle(f);
+  if (!ok || (size >= 2 && (unsigned char)raw[0] == 0xFF && (unsigned char)raw[1] == 0xFE)) { free(raw); return; }
+  int skip = size >= 3 && (unsigned char)raw[0] == 0xEF && (unsigned char)raw[1] == 0xBB && (unsigned char)raw[2] == 0xBF ? 3 : 0;
+  UINT cp = skip ? CP_UTF8 : CP_ACP;
+  int n = MultiByteToWideChar(cp, 0, raw + skip, (int)(size - skip), NULL, 0);
+  wchar_t *w = malloc(((size_t)n + 1) * sizeof(wchar_t));
+  if (w && (n == 0 || MultiByteToWideChar(cp, 0, raw + skip, (int)(size - skip), w + 1, n))) {
+    w[0] = 0xFEFF;
+    wchar_t tmp[MAX_PATH]; _snwprintf(tmp, MAX_PATH, L"%ls.new", g_ini);
+    HANDLE o = CreateFileW(tmp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    DWORD put = 0;
+    if (o != INVALID_HANDLE_VALUE) {
+      BOOL wrote = WriteFile(o, w, (DWORD)((n + 1) * sizeof(wchar_t)), &put, NULL);
+      CloseHandle(o);
+      if (wrote && MoveFileExW(tmp, g_ini, MOVEFILE_REPLACE_EXISTING)) logf("settings: HorizonConnect.ini is now Unicode (UTF-16)");
+      else DeleteFileW(tmp);
+    }
+  }
+  free(w); free(raw);
+}
+
 static void own_identity(void) {
   const ULONG64 azimuth_id = 0x9000000000000ULL;   // 2533274790395904
+  ULONG64 earlier = 0;                              // the id this folder had before it came to this PC
+  wchar_t pc[24], owner[24];
+  this_pc(pc, 24);
+  GetPrivateProfileStringW(L"xbl", L"Owner", L"", owner, 24, g_ini);
+  if (pc[0] && owner[0] && _wcsicmp(pc, owner) && g_xuid[0] && _wcsicmp(g_xuid, L"auto")) {
+    logf("identity: this mod folder was set up on another PC; this PC gets its own player id");
+    earlier = wcstoull(g_xuid, NULL, 10);
+    wchar_t addr_of_earlier[64]; device_address(earlier, addr_of_earlier);   // was the device address made from it?
+    wcscpy(g_xuid, L"auto");
+    if (!wcscmp(g_localAddress, addr_of_earlier)) wcscpy(g_localAddress, L"auto");
+  }
+  if (pc[0] && _wcsicmp(pc, owner)) WritePrivateProfileStringW(L"xbl", L"Owner", pc, g_ini);
   if (!g_xuid[0] || !_wcsicmp(g_xuid, L"auto")) {
     LARGE_INTEGER qpc; QueryPerformanceCounter(&qpc);
     ULONG64 seed = (ULONG64)qpc.QuadPart ^ (GetTickCount64() << 20) ^ ((ULONG64)GetCurrentProcessId() << 40) ^ (ULONG64)(uintptr_t)&qpc;
@@ -713,21 +781,18 @@ static void own_identity(void) {
     azimuth_folder(az);
     _snwprintf(from, MAX_PATH, L"%lsdata\\titles\\1A96545B\\saves\\player-1\\User_%llX", az, azimuth_id);
     _snwprintf(to, MAX_PATH, L"%lsdata\\titles\\1A96545B\\saves\\player-1\\User_%llX", az, id);
+    if (earlier && earlier != azimuth_id) {   // Azimuth's folder came along too: the progress under the earlier id
+      wchar_t prev[MAX_PATH];
+      _snwprintf(prev, MAX_PATH, L"%lsdata\\titles\\1A96545B\\saves\\player-1\\User_%llX", az, earlier);
+      if (GetFileAttributesW(prev) != INVALID_FILE_ATTRIBUTES) wcscpy(from, prev);
+    }
     if (GetFileAttributesW(to) == INVALID_FILE_ATTRIBUTES && GetFileAttributesW(from) != INVALID_FILE_ATTRIBUTES) {
       copy_tree(from, to);
       logf("identity: the save so far copied to %ls", to);
     }
   }
-  if (!g_localAddress[0] || !_wcsicmp(g_localAddress, L"auto")) {   // base64 of "horizon-<id>"
-    char raw[48]; int n = snprintf(raw, sizeof raw, "horizon-%llu", id);
-    static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    int o = 0;
-    for (int i = 0; i < n; i += 3) {
-      unsigned v = (unsigned char)raw[i] << 16 | (i + 1 < n ? (unsigned char)raw[i + 1] << 8 : 0) | (i + 2 < n ? (unsigned char)raw[i + 2] : 0);
-      g_localAddress[o++] = b64[v >> 18 & 63]; g_localAddress[o++] = b64[v >> 12 & 63];
-      g_localAddress[o++] = i + 1 < n ? b64[v >> 6 & 63] : L'='; g_localAddress[o++] = i + 2 < n ? b64[v & 63] : L'=';
-    }
-    g_localAddress[o] = 0;
+  if (!g_localAddress[0] || !_wcsicmp(g_localAddress, L"auto")) {
+    device_address(id, g_localAddress);
     WritePrivateProfileStringW(L"net", L"LocalAddress", g_localAddress, g_ini);
     logf("identity: device address %ls", g_localAddress);
   }
@@ -808,6 +873,7 @@ static void start(const wchar_t *path) {
     wchar_t old[MAX_PATH]; _snwprintf(old, MAX_PATH, L"%lsfh2net.ini", path);
     if (GetFileAttributesW(g_ini) == INVALID_FILE_ATTRIBUTES && MoveFileW(old, g_ini)) logf("settings: fh2net.ini renamed to HorizonConnect.ini");
   }
+  ini_unicode();
   g_netLevel = GetPrivateProfileIntW(L"net", L"ConnectivityLevel", 0, g_ini);
   g_fakeToken = GetPrivateProfileIntW(L"xbl", L"FakeToken", 0, g_ini);
   GetPrivateProfileStringW(L"xbl", L"Token", L"XBL3.0 x=1234567890;horizonconnect", g_token, 512, g_ini);

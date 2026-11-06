@@ -446,8 +446,23 @@ REST = [
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
+    def from_the_game(self):
+        """Only the game's requests (HorizonConnect.dll adds X-Horizon-Host and connects to 127.0.0.1). A web page
+        in a browser can reach 127.0.0.1 too, but can't add that header without being stopped, and a page that
+        renames itself to 127.0.0.1 (DNS rebinding) still sends its own name as Host."""
+        host = (self.headers.get('Host') or '').lower()
+        return bool(self.headers.get('X-Horizon-Host')) and host.split(':')[0] in ('127.0.0.1', 'localhost')
+
     def handle_any(self):
+        if not self.from_the_game():
+            self.send_response(403)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
         n = int(self.headers.get('Content-Length') or 0)
+        if n > 16 * 1024 * 1024:
+            self.send_response(413); self.send_header('Content-Length', '0'); self.end_headers()
+            return
         body = self.rfile.read(n) if n else b''
         host = self.headers.get('X-Horizon-Host', self.headers.get('Host', '?'))
         with lock:

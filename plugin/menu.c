@@ -247,11 +247,16 @@ static int menu_properties(void) {
 
 // ---- page text ----------------------------------------------------------------------------------------------------
 
+// Text for a XAML attribute: XML's special characters as entities, other control characters left out (they make the
+// page invalid), and a leading "{" escaped with "{}" (XAML would read it as a markup extension, e.g. a server name
+// "{Binding ...}").
 static void xml_escape(const wchar_t *in, wchar_t *out, int len) {
   int n = 0;
+  if (*in == L'{' && len > 3) { out[n++] = L'{'; out[n++] = L'}'; }
   for (; *in && n < len - 8; in++) {
     const wchar_t *r = *in == L'&' ? L"&amp;" : *in == L'<' ? L"&lt;" : *in == L'>' ? L"&gt;" : *in == L'"' ? L"&quot;" : *in == L'\n' ? L"&#10;" : NULL;
-    if (r) { wcscpy(out + n, r); n += (int)wcslen(r); } else out[n++] = *in;
+    if (r) { wcscpy(out + n, r); n += (int)wcslen(r); }
+    else if (*in >= 0x20 && *in != 0x7F && !(*in >= 0xFFFE)) out[n++] = *in;
   }
   out[n] = 0;
 }
@@ -663,7 +668,7 @@ static void clip_text(wchar_t *out, int n) {
   if (!clipboard_get(c, 256)) { out[0] = 0; return; }
   wchar_t *s = c; while (*s == L' ' || *s == L'\t' || *s == L'\r' || *s == L'\n') s++;
   int len = (int)wcslen(s); while (len && (s[len - 1] == L' ' || s[len - 1] == L'\r' || s[len - 1] == L'\n' || s[len - 1] == L'\t')) s[--len] = 0;
-  for (wchar_t *p = s; *p; p++) if (*p == L'\r' || *p == L'\n' || *p == L'|') *p = L' ';
+  for (wchar_t *p = s; *p; p++) if (*p < 0x20 || *p == 0x7F || *p == L'|') *p = L' ';   // control characters, the list's separator
   wcsncpy(out, s, n - 1); out[n - 1] = 0;
 }
 
