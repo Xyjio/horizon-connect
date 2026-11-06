@@ -129,8 +129,10 @@ def sync_done(own_attempt):
 #   Plain (0, 0): the object belongs to the connection it came from.
 # Routers seen (id bits, type bits or 0): 1, 2, 3: (7, 0) - the player's objects; 9: (4, 2), 3 types;
 #   12: (4, 2), 2 types; 6: (2, 2), the lobby's: type 0 SessionHost, 1 GameOptions (only the server makes these).
-#   Also registered: 8, 10, 11.
-ROUTERS = {1: (7, 0), 2: (7, 0), 3: (7, 0), 6: (2, 2), 9: (4, 2), 12: (4, 2)}
+#   10: (1, 0), the session's weather (WeatherSynced, the server's). Router ids are each class's vtable+0x38
+#   (1 PlayerData, 3 ConsoleSynced, 6 SessionHost/GameOptions, 9 RoadTrip, 10 Weather, 11 CarMeet, 12 BucketList);
+#   the widths come from the router's SyncedObjectManager (1417A7C60: bit length of max objects / max types).
+ROUTERS = {1: (7, 0), 2: (7, 0), 3: (7, 0), 6: (2, 2), 9: (4, 2), 10: (1, 0), 12: (4, 2)}
 
 
 def read_object(r, msg):
@@ -282,6 +284,151 @@ REPAIR_DAMAGE = 35
 # 1417F7A50): no fields. Both are a console's requests to the server.
 def read_leader_change(r):
     return read_handle(r, 7)
+
+
+# Formats of the other messages a console sends (from each one's Send function; the receive side reads the
+# same). A field is ('h', id bits): a handle; ('u', n): n bits; ('blob',): compact length + 8-bit bytes
+# (BitStream 14176A900 - strings and the 8-byte doubles of the score messages). The relay reads these so the
+# rest of a packet isn't lost behind them.
+U = lambda n: ('u', n)
+H7, H2, BLOB = ('h', 7), ('h', 2), ('blob',)
+VEC3 = U(96)                   # 3 floats (14181FFA0)
+MSG_FORMATS = {
+    16: [U(8), U(32), VEC3, U(144), U(32), U(1), U(1)],       # ServerTrafficFullSync (1417F6E70)
+    17: [U(8), U(96), VEC3],                                   # ServerTrafficRouteProgressUpdate (1417F6C00)
+    20: [H7, U(32), VEC3, U(32)],                              # MsgBreakGlass (141804B10)
+    22: [U(16), U(384)],                                       # MsgCollObjPos (receive 1417DDA10)
+    23: [U(16), U(384), U(32)],                                # MsgCollObjRest (1417DDDC0)
+    24: [U(4), U(11), U(8)],                                   # MsgCollObjDetachPart (1417DDB10)
+    25: [U(16), U(288), U(32), U(32)],                         # MsgCollObjPosVel (1417DDCC0)
+    26: [U(2), U(32)],                                         # MsgCarMeetPlayerInviteRequest (1417F75D0)
+    27: [U(1), U(2), U(32)],                                   # MsgCarMeetPlayerJoinOrCancelRequest (1417F70F0)
+    31: [U(32)],                                               # MsgCarMeetConfiguredGameOptionsForWagerRace
+    32: [BLOB, BLOB],                                          # MsgCarMeetGameModeSessionReady (1417F7380)
+    33: [U(64), U(7), U(8)],                                   # MsgChatManagement (1417F5040)
+    36: [H7, H7, U(12)],                                       # MsgTagCollision (1418048B0)
+    38: [],                                                    # MsgRequestRace
+    41: [H2, U(1)],                                            # MsgReadyRequest (1417F7B20)
+    43: [H7, U(32), U(1)],                                     # MsgInProgressScoreUpdate (1418040E0)
+    44: [H7, BLOB, BLOB, BLOB, U(32), U(1), U(1)],             # MsgLapScore (141804270)
+    45: [H7, BLOB, BLOB, BLOB, BLOB, BLOB, U(32), U(24), U(3)],  # MsgScoreKeyframe (1418044E0)
+    46: [H2, U(64)],                                           # MsgVoteToKick (141815870)
+    47: [H2, U(32)],                                           # MsgVoteForTrack (141811E60)
+    49: [U(1)],                                                # SelectedNextRoadTripEvent
+    51: [U(32), U(16)],                                        # ConfiguredGameOptionsForRoadTripEvent
+    52: [H2, U(32)],                                           # SetGroupSatNavEvent (141815730)
+    54: [U(224), U(96), U(32), U(32)],                         # FullWeather (1417F6840)
+    56: [U(224)],                                              # NewAtmosphericData (1417F69E0)
+    58: [U(96)],                                               # NewPrecipitationData (1417F6AF0)
+    62: [U(1)],                                                # BucketListChallengeEnded
+    63: [U(32), U(32)],                                        # RequestSynchronizeBucketListChallenge
+    64: [],                                                    # RequestDesynchronizeBucketListChallenge
+    70: [H2],                                                  # MsgInactivePlayersPulled (1417F7000)
+    71: [U(4), U(36), U(32)],                                  # ServerTrafficMessage (1417F5210): type, data, seq
+    73: [U(8), U(130), U(96), VEC3],                          # ServerTrafficFullRoute (1417F6CD0)
+    74: [U(8), VEC3, U(48), U(32), U(1)],                     # ServerTrafficStationary (1417F6DB0)
+}
+
+
+def read_fields(r, fmt):
+    out = []
+    for f in fmt:
+        if f[0] == 'h':
+            out.append(('h', f[1], read_handle(r, f[1])))
+        elif f[0] == 'u':
+            out.append(('u', f[1], r.bits(f[1])))
+        else:
+            n = r.cuint()
+            out.append(('blob', bytes(r.bits(8) for _ in range(n))))
+    return out
+
+
+def write_fields(msg, fields):
+    w = BitWriter().bits(msg, 7)
+    for f in fields:
+        if f[0] == 'h':
+            h = f[2]
+            w.bits(h['a'], 1).bits(h['b'], 1).bits(h['id'], f[1])
+            if h['b'] and not h['a']:
+                w.bits(h['peer'], 8)
+        elif f[0] == 'u':
+            w.bits(f[2], f[1])
+        else:
+            w.cuint(len(f[1]))
+            for c in f[1]:
+                w.bits(c, 8)
+    return w
+
+
+def read_delete(r):
+    """ObjectDelete (9) after the message id: router, handle, seq."""
+    router = r.bits(4)
+    idw, _ = ROUTERS.get(router, (None, None))
+    if idw is None:
+        raise ValueError(f'unknown router {router}')
+    h = read_handle(r, idw)
+    return dict(router=router, id=h['id'], a=h['a'], b=h['b'], peer=h.get('peer'), seq=r.bits(8))
+
+
+# Weather. The server owns the session's WeatherSynced (router 10, object 0; NerdLib 141808990, made by
+# NetworkWeather's factory 1409E9930). 11 var slots, so a 4-bit index; the vars (registered 141808FF0) are an
+# atmosphere and a precipitation part (SyncedStructs 141823250 / 141823DA0):
+#   0 atmosphere CurrentIntensity (float, raw 32 bits)  1 CurrentTick (u32, server ms)
+#   2 DesiredIntensity (float)  3 DesiredTick (u32)  4 DesiredPresetIndex (4 x int32)
+#   5 precipitation CurrentIntensity  6 CurrentTick  7 DesiredIntensity  8 DesiredTick
+# A console applies it (1406F0CB0) as intensity = Current + (Desired - Current) * t, t = 0..1 between the two
+# ticks on the server clock (TimeSync), plus the 4 atmosphere presets.
+# The server asks the first player for its weather with RequestSendFullWeather (53, no fields); the answer is
+# FullWeather (54): atmosphere data (1406F5520 from the weather manager w: f32 target w+0xC, f32 ms to reach it,
+# f32 ms (w+0x14), 4 x u32 presets w+0xA8..), precipitation data (f32 target w+0x20, f32 ms to reach it, f32 ms
+# (w+0x24)), u32 (int) current atmosphere intensity, u32 (int) current precipitation intensity. Later the server
+# asks any player for new data: RequestSendNewAtmosphericData (55) -> NewAtmosphericData (56, the atmosphere
+# data), RequestSendNewPrecipitationData (57) -> NewPrecipitationData (58).
+WEATHER_ROUTER = 10
+WEATHER_INDEX_BITS = 4
+REQUEST_FULL_WEATHER, FULL_WEATHER = 53, 54
+REQUEST_ATMOSPHERE, ATMOSPHERE = 55, 56
+REQUEST_PRECIPITATION, PRECIPITATION = 57, 58
+
+
+def f32(bits):
+    return struct.unpack('<f', struct.pack('<I', bits & 0xFFFFFFFF))[0]
+
+
+def f32_bits(v):
+    return struct.unpack('<I', struct.pack('<f', v))[0]
+
+
+def read_atmosphere(v):
+    """The 224-bit atmosphere data: target, ms to reach it, ms (hold), 4 presets."""
+    r = BitReader(v.to_bytes(28, 'little'))
+    return dict(target=f32(r.bits(32)), ms=f32(r.bits(32)), hold=f32(r.bits(32)),
+                presets=[r.bits(32) for _ in range(4)])
+
+
+def read_precipitation(v):
+    r = BitReader(v.to_bytes(12, 'little'))
+    return dict(target=f32(r.bits(32)), ms=f32(r.bits(32)), hold=f32(r.bits(32)))
+
+
+def weather_vars(w, only=None):
+    """The WeatherSynced payload: w = dict(a_cur, a_cur_tick, a_des, a_des_tick, presets, p_cur, p_cur_tick,
+    p_des, p_des_tick); only = the var indexes to write (default all)."""
+    vals = [('f', w['a_cur']), ('u', w['a_cur_tick']), ('f', w['a_des']), ('u', w['a_des_tick']),
+            ('a', w['presets']), ('f', w['p_cur']), ('u', w['p_cur_tick']), ('f', w['p_des']), ('u', w['p_des_tick'])]
+    out = BitWriter()
+    for i, (kind, v) in enumerate(vals):
+        if only is not None and i not in only:
+            continue
+        out.bits(i, WEATHER_INDEX_BITS)
+        if kind == 'f':
+            out.bits(f32_bits(v), 32)
+        elif kind == 'u':
+            out.bits(v & 0xFFFFFFFF, 32)
+        else:
+            for x in v:
+                out.bits(x & 0xFFFFFFFF, 32)
+    return out
 
 
 def concat(*msgs):

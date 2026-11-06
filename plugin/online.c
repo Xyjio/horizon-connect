@@ -221,6 +221,72 @@ static int json_string(const char *json, const char *key, char *out, int len) {
   return n > 0;
 }
 
+// ---- update check -------------------------------------------------------------------------------------------------
+// [online] CheckUpdates=1 (default): a few seconds after start, ask GitHub for the newest release. When it is newer
+// than this version, the server list shows a row for it (A opens the release page in the browser).
+#define HC_RELEASES_API L"/repos/Xyjio/horizon-connect/releases/latest"
+#define HC_RELEASES_PAGE L"https://github.com/Xyjio/horizon-connect/releases/latest"
+static char g_newVersion[32];             // the newest release's version if it is newer than HC_VERSION, else ""
+static wchar_t g_newUrl[256] = HC_RELEASES_PAGE;
+
+// "1.0.10" > "1.0.9": compares the dot-separated numbers in order.
+static int version_cmp(const char *a, const char *b) {
+  while (*a || *b) {
+    long x = strtol(a, (char **)&a, 10), y = strtol(b, (char **)&b, 10);
+    if (x != y) return x < y ? -1 : 1;
+    if (*a == '.') a++;
+    if (*b == '.') b++;
+    if ((*a && !isdigit((unsigned char)*a)) || (*b && !isdigit((unsigned char)*b))) break;   // "-beta" etc.: equal so far
+  }
+  return 0;
+}
+
+static char *https_get(const wchar_t *host, const wchar_t *path) {
+  HINTERNET s = WinHttpOpen(L"HorizonConnect/" HC_VERSION_W, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+  if (!s) return NULL;
+  HINTERNET c = WinHttpConnect(s, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
+  HINTERNET r = c ? WinHttpOpenRequest(c, L"GET", path, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE) : NULL;
+  char *out = NULL;
+  if (r) {
+    DWORD status = 0, size = sizeof status;
+    if (WinHttpSendRequest(r, L"Accept: application/vnd.github+json\r\n", (DWORD)-1, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) && WinHttpReceiveResponse(r, NULL)
+        && WinHttpQueryHeaders(r, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, WINHTTP_NO_HEADER_INDEX)
+        && status == 200) {
+      size_t len = 0, cap = 8192; out = malloc(cap);
+      DWORD got;
+      while (out && WinHttpReadData(r, out + len, (DWORD)(cap - len - 1), &got) && got) {
+        len += got;
+        if (cap - len < 1024) { char *grown = realloc(out, cap *= 2); if (!grown) { free(out); out = NULL; break; } out = grown; }
+      }
+      if (out) out[len] = 0;
+    } else logf("update: GitHub answered %lu", status);
+    WinHttpCloseHandle(r);
+  }
+  if (c) WinHttpCloseHandle(c);
+  WinHttpCloseHandle(s);
+  return out;
+}
+
+static DWORD WINAPI update_thread(LPVOID unused) {
+  (void)unused;
+  Sleep(8000);                            // not while the game is starting up
+  char *reply = https_get(L"api.github.com", HC_RELEASES_API), tag[32], url[256];
+  if (reply && json_string(reply, "tag_name", tag, sizeof tag)) {
+    const char *v = (tag[0] == 'v' || tag[0] == 'V') ? tag + 1 : tag;
+    if (version_cmp(v, HC_VERSION) > 0) {
+      if (json_string(reply, "html_url", url, sizeof url) && !strncmp(url, "https://github.com/", 19)) _snwprintf(g_newUrl, 256, L"%hs", url);
+      snprintf(g_newVersion, sizeof g_newVersion, "%s", v);
+      logf("update: Horizon Connect %s is out (this is " HC_VERSION ") - %ls", v, g_newUrl);
+    } else logf("update: up to date (newest release %s)", v);
+  } else logf("update: no answer from GitHub");
+  free(reply);
+  return 0;
+}
+
+static void update_check_start(void) {
+  if (GetPrivateProfileIntW(L"online", L"CheckUpdates", 1, g_ini)) CloseHandle(CreateThread(NULL, 0, update_thread, NULL, 0, NULL));
+}
+
 static void secret_path(wchar_t *out) {
   wchar_t base[MAX_PATH], old[MAX_PATH];
   if (!GetEnvironmentVariableW(L"LOCALAPPDATA", base, MAX_PATH)) wcscpy(base, L".");
@@ -413,6 +479,7 @@ static void online_start(const wchar_t *plugin_dir) {
   }
   g_autoServer = GetPrivateProfileIntW(L"online", L"AutoServer", 1, g_ini);
   g_localPort = GetPrivateProfileIntW(L"online", L"LocalPort", 5101, g_ini);
+  update_check_start();
   if (!g_autoServer) return;
   start_local_server();
   // web calls: always this PC's server; the server check is left to the game's own retries (the server needs a
