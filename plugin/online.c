@@ -486,20 +486,18 @@ static int playit_create_tunnel(const char *secret, const char *agent_id) {
            "\"endpoint\":{\"type\":\"region\",\"details\":{\"region\":\"global\"}},\"enabled\":true}", proto, agent_id, fields);
   snprintf(bodies[2], 900, "{\"name\":\"" TUNNEL_NAME "\",\"protocol\":%s,\"origin\":{\"type\":\"agent\",\"data\":{\"agent_id\":\"%s\",\"config\":%s}},"
            "\"enabled\":true}", proto, agent_id, fields);
-  int too_old = 0;
   for (int i = 0; i < 3; i++) {
     char *reply = playit_post(L"/v1/tunnels/create", bodies[i], secret);
     logf("playit: create tunnel, try %d -> %.400s", i + 1, reply ? reply : "(no answer)");
     int ok = reply && strstr(reply, "\"status\":\"success\"");
-    if (reply && strstr(reply, "AgentVersionTooOld")) too_old = 1;
     free(reply);
     if (ok) return 1;
   }
-  return too_old ? -1 : 0;
+  return 0;
 }
 
 static int playit_tunnel(const char *secret, wchar_t *address, int len) {
-  int created = 0, next_try = 0;
+  int created = 0;
   for (int i = 0; i < 90; i++) {                          // ~3 minutes at 2 s
     char *run = playit_post(L"/v1/agents/rundata", "{}", secret);
     if (run && (i == 0 || i == 10)) logf("playit: rundata -> %.700s", run);
@@ -508,12 +506,10 @@ static int playit_tunnel(const char *secret, wchar_t *address, int len) {
     json_string(run, "agent_id", agent_id, sizeof agent_id);
     free(run);
     if (found == 1) return 1;
-    // A newly claimed agent is "too old" for playit until playitd has connected and told its version: try again.
-    if (found == -1 && !created && agent_id[0] && i >= next_try) {
-      int r = playit_create_tunnel(secret, agent_id);
-      if (r == 1) created = 1;
-      else if (r == -1) { next_try = i + 5; logf("playit: the agent hasn't reported its version yet; trying again in 10 s"); }
-      else { logf("playit: no request shape was accepted; see the answers above"); return 0; }
+    // (a free playit account allows one tunnel: a second agent gets "AgentVersionTooOld" here)
+    if (found == -1 && !created && agent_id[0]) {
+      created = 1;
+      if (!playit_create_tunnel(secret, agent_id)) { logf("playit: no request shape was accepted; see the answers above"); return 0; }
     }
     Sleep(2000);
   }
