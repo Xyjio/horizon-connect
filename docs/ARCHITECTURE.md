@@ -30,8 +30,9 @@ cars). Horizon Connect answers all of that on the players' own PCs.
   gives offline (QoS measurements, secure device association, party registration).
 - `patches.c` – the player id (Azimuth's XboxUserId) and two waits the game would never finish without Turn 10's
   traffic / weather service.
-- `online.c` – starts the local server (hidden, ends with the game), sets up and runs the playit agent, and
-  decides where the game's UDP goes (`online_set_join`).
+- `online.c` – starts the local server (hidden, ends with the game), sets up and runs the playit agent,
+  decides where the game's UDP goes (`online_set_join`) and asks GitHub for the newest release
+  (`CheckUpdates`).
 - `menu.c` – the HORIZON CONNECT pages in the pause menu: native pages of the game (a VideoOptions page with its own
   XAML), the server list with status pings, adding / editing servers, hosting; joining fires the pause menu's
   own `online_private_freeroam` transition.
@@ -47,7 +48,9 @@ cars). Horizon Connect answers all of that on the players' own PCs.
   SessionHost object (an invite-only session), forwards every object, car update, collision and repair to the
   other players (numbering object updates per receiver) and replays the history to players who join later. It
   chooses the session leader - the host when they join, else whoever has been in the session longest - and sets
-  it in each player's PlayerData (`IsLeader`). It also answers `FH2O?` with `FH2O!{"players": n, "max": m}` for the server list.
+  it in each player's PlayerData (`IsLeader`). It owns the session's WeatherSynced object: the first console's
+  FullWeather sets it, later Atmosphere / Precipitation requests keep it moving. The time of day online is the
+  server clock (48 game seconds per real second), so the clock starts at `--start-hour` (10:00). It also answers `FH2O?` with `FH2O!{"players": n, "max": m}` for the server list.
 - `run_server.py` – starts `fh2srv.py` and keeps its output in `logs\`.
 
 ## Settings

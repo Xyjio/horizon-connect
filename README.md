@@ -32,7 +32,7 @@ This repository contains **no game files**. You need your own copy of the game.
 
 ## Install
 
-1. Download `Horizon-Connect-1.0.2.zip` from the [Releases](../../releases) page.
+1. Download `Horizon-Connect-1.0.3.zip` from the [Releases](../../releases) page.
 2. Unzip it and copy the folder `Horizon Connect` into `<Azimuth folder>\mods\`.
 3. Start the game. If Windows Firewall asks about `python` or `playitd`, allow it.
 
@@ -56,6 +56,7 @@ More detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
   leader. The leader has the star icon in the player list.
 - Liveries of others show once they were saved online in the paint shop.
 - Joining from the list starts free roam on the mainland (not Storm Island).
+- No traffic in online free roam yet.
 
 What's being worked on and what comes next: **[ROADMAP.md](ROADMAP.md)**.
 

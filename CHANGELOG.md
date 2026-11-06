@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.3
+
+- Same weather and time of day for everyone: the server takes the weather from the first player's game and
+  sends every change to all players. The time of day starts at 10:00 when the server starts; online, a game day
+  lasts 30 minutes.
+- The relay now reads every message the game sends and passes on the ones for other players (also breaking
+  glass and parts coming off).
+- The server list shows when a new version of Horizon Connect is out (A opens the download page). Turn it off
+  with `CheckUpdates=0` in `[online]`.
+- Note: still no traffic in online free roam.
+
 ## 1.0.2
 
 - One session leader (star icon in the player list, "You are the leader" hint): the host when they join,
