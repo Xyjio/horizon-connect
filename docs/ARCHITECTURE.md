@@ -57,6 +57,18 @@ cars). Horizon Connect answers all of that on the players' own PCs.
   `X-Horizon-Relay`). Its sequenced packets are kept until the console acks them and sent again after 0.4 s; a
   packet it can't read is skipped; only an FH2 OpenConnection gets a player slot. It listens on 127.0.0.1 (the
   host's console and the playit agent) unless `--game-host ::` (`[online] OpenToLan=1`).
+- Events (races), also in `relay.py` (`event_tick`), as Turn 10's server ran them: the leader's console asks for
+  ownership of the lobby's GameOptions and sets the event up; the relay passes its GameOptions on to the others
+  (whose consoles made their own copy, kept under handle flags 1, 0). The leader's MsgRequestRace makes the
+  SessionHost race ready with a countdown and goes on to the others (their join prompt). Who is ready when the
+  countdown ends takes part (ConsoleSynced ParticipatingInRace, also set on the others' copies); when all have
+  loaded the participants' cars, MsgStartingGrid; when all are render ready, MsgStartRace a few seconds ahead,
+  then SessionHost InRace. Lobby event messages start with the handle of the SessionHost. Scores
+  (MsgInProgressScoreUpdate, MsgLapScore, MsgScoreKeyframe) go to the others with the player handle translated;
+  after the last finisher (or 30 s after the first) InRace goes off, which ends the results screen. A player who
+  says it is no longer ready drops out.
+- `netsim.py` – testing only: with a `netsim.json` next to `relay.py` (`{"delay_ms": 70, "jitter_ms": 50,
+  "loss": 0.05}`), packets to and from the tunnel's players are delayed and dropped like on a bad line.
 - fh2srv answers only the game's requests (`X-Horizon-Host` and a 127.0.0.1 / localhost Host).
 - `run_server.py` – starts `fh2srv.py` and keeps its output in `logs\` (the newest 30; capture lists over 20 MB
   are rotated, request bodies older than 7 days removed).

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0
+
+- **Online events and races.** The session leader (star) starts an event in online free roam as usual; the others
+  get the game's join prompt. Everyone who joins picks a car, is on the starting grid, and the race starts at the
+  same moment for all. Positions, lap times and results are shared, and afterwards everyone gets their rewards and
+  drives on in free roam. Races can follow one another;
+  a player who leaves or is disconnected drops out of the race, the others race on.
+- Only the host needs 1.1.0 for races (the server does the work); still, everyone should update.
+- Tested with a simulated internet line (150-250 ms ping, 5 % of packets lost) between two players.
+
 ## 1.0.6
 
 - The other players' gamertags instead of "Driver 1234" (everyone in the session needs 1.0.6 for this).

@@ -159,10 +159,13 @@ def read_object(r, msg):
     return o
 
 
-def object_msg(msg, router, id, seq, payload=None, peer=None, type=0):
+def object_msg(msg, router, id, seq, payload=None, peer=None, type=0, console_made=False):
+    """console_made: one of the server's objects that each console makes itself (the lobby's GameOptions 0 and 2,
+    CLobby 140A2BF84): the console keeps it under flags (1, 0), not under (0, 0) like the objects we create, so
+    updates of it go with flags 1, 0."""
     idw, typew = ROUTERS[router]
     w = BitWriter().bits(msg, 7).bits(router, 4)
-    w.bits(0, 1).bits(1 if peer is not None else 0, 1).bits(id, idw)
+    w.bits(1 if console_made else 0, 1).bits(1 if peer is not None else 0, 1).bits(id, idw)
     if peer is not None:
         w.bits(peer, 8)
     if msg == 7 and typew:
@@ -221,6 +224,21 @@ def server_update(router, id, seq, payload):
 # 2 ParticipatingInRace, 3 RaceInProgress, 4 Ready, 5 HasLoadedCarsForAllParticipants, 6 HasGrid,
 # 7 AvailableArbitration, 8 MatchTicketArbiter. Bools are 1 bit; 1, 2 and 4 are the server's (SyncedBool<0,1>).
 CONSOLE_SESSION_ENTRY_FINALISED = 1
+CONSOLE_RENDER_READY = 0
+CONSOLE_RACE_IN_PROGRESS, CONSOLE_HAS_LOADED_CARS, CONSOLE_HAS_GRID = 3, 5, 6
+
+
+def read_console_vars(payload):
+    """{index: value} from a ConsoleSynced update: 0-6 are bools, 7 AvailableArbitration 2 bits (seen: 1, 2)."""
+    r, out = BitReader(bytes(payload.buf)), {}
+    while r.pos + 5 <= payload.pos:
+        i = r.bits(4)
+        if i > 7 or r.pos + (2 if i == 7 else 1) > payload.pos:
+            break
+        out[i] = r.bits(2 if i == 7 else 1)
+    return out
+CONSOLE_PARTICIPATING_IN_RACE = 2
+CONSOLE_READY = 4
 
 # SessionHostSynced (router 6 type 0; NerdLib 14180FF70): 15 vars, so a 4-bit var index. 0 LobbyType, 1 PrivacyMode
 # (SyncedEnum<SessionPrivacy>, 2 bits: 0 Public, 1 InviteOnly - stateflow get_session_privacy, NetworkGetSessionPrivacy
@@ -232,8 +250,71 @@ SESSION_PRIVACY = 1
 SESSION_INVITE_ONLY = 1
 
 
+# The rest of SessionHostSynced (its constructor 14180FF70; widths from each var's type): 2 CountdownType (enum
+# like PrivacyMode, SyncedEnum<..., 0, 1, 0>: 2 bits), 3 CountdownEndTime (u32, server ms), 4 RaceReady,
+# 5 RaceParticipantsSelected, 6 InRace (bools), 7 LastInactivePlayersPulledTime (u32), 8 RoundGuid (string, max 36),
+# 9 RaceStartTime (u32), 10 NumLapsCompleted (u8), 11 FurthestProgress (f32), 12 GroupSatNavNode (s32).
+# PrivacyMode is read as 2 bits: written as 1 bit, a joining console read past the packet and crashed (game+1767799).
+SESSION_COUNTDOWN_TYPE, SESSION_COUNTDOWN_END, SESSION_RACE_READY = 2, 3, 4
+SESSION_PARTICIPANTS_SELECTED, SESSION_IN_RACE, SESSION_RACE_START_TIME = 5, 6, 9
+
+
 def session_host_vars():
     return BitWriter().bits(SESSION_PRIVACY, SESSION_HOST_INDEX_BITS).bits(SESSION_INVITE_ONLY, 2)
+
+
+def session_host_update(**values):
+    """SessionHost vars by name: countdown_type, countdown_end, race_ready, participants_selected, in_race,
+    race_start_time."""
+    layout = [('countdown_type', SESSION_COUNTDOWN_TYPE, 2), ('countdown_end', SESSION_COUNTDOWN_END, 32),
+              ('race_ready', SESSION_RACE_READY, 1), ('participants_selected', SESSION_PARTICIPANTS_SELECTED, 1),
+              ('in_race', SESSION_IN_RACE, 1), ('race_start_time', SESSION_RACE_START_TIME, 32)]
+    w = BitWriter()
+    for name, index, bits in layout:
+        if name in values:
+            w.bits(index, SESSION_HOST_INDEX_BITS).bits(int(values[name]) & ((1 << bits) - 1), bits)
+    return w
+
+
+# Events (client side in the game; the server's side is ours). MsgRequestRace (38, no fields): the leader starts
+# the event. MsgReadyRequest (41): a lobby handle (2-bit id) and a bool - a console says it is (not) ready.
+# The server answers MsgReadyRequestResponse (42: 2 bits, receive 141824265) and sets the console's Ready.
+# Then MsgStartingGrid (39: 4-bit count, then that many 7-bit car handles; receive 141824057) and MsgStartRace
+# (40: u32 start time; receive 1418241F5) - these three from the server begin with a lobby handle (lobby_event).
+# A racer's scores: MsgInProgressScoreUpdate (43), MsgLapScore (44), MsgScoreKeyframe (45, at the finish), each
+# with the racer's PlayerData handle first (formats in MSG_FORMATS).
+MSG_REQUEST_RACE, MSG_STARTING_GRID, MSG_START_RACE = 38, 39, 40
+MSG_READY_REQUEST, MSG_READY_RESPONSE = 41, 42
+MSG_IN_PROGRESS_SCORE, MSG_LAP_SCORE, MSG_SCORE_KEYFRAME = 43, 44, 45
+
+
+def lobby_event(msg, target=1):
+    """A lobby event message from the server starts with the handle of the lobby object it is for (NerdLib's
+    RouterEventMessageHandler, 1418091C0: a 2-bit id handle, looked up in router 6, then the ILobbyEvents of that
+    object gets the fields). StartingGrid, StartRace and ReadyRequestResponse go to the server's SessionHost (the
+    game's SessionHost implements them: 140A2E130, 140A2E020); without the handle the console reads the fields as
+    one, finds nothing, and leaves the session."""
+    return write_handle(BitWriter().bits(msg, 7), ROUTERS[6][0], target)
+
+
+def starting_grid(handles, target=1):
+    """MsgStartingGrid: the participants' cars in grid order, as the receiver knows them (handle dicts: its own car
+    (0, 0), the others' as the relay forwards them, (0, 1) + the owner's index). Each handle is read with
+    1417BA4D0 and compared with the car's own handle as it is (140A31140)."""
+    w = lobby_event(MSG_STARTING_GRID, target).bits(len(handles), 4)
+    for h in handles:
+        w.bits(h['a'], 1).bits(h['b'], 1).bits(h['id'], 7)
+        if h['b'] and not h['a']:
+            w.bits(h['peer'], 8)
+    return w
+
+
+def start_race(start_ms, target=1):
+    return lobby_event(MSG_START_RACE, target).bits(start_ms & 0xFFFFFFFF, 32)
+
+
+def ready_response(code, target=1):
+    return lobby_event(MSG_READY_RESPONSE, target).bits(code, 2)
 
 
 # PlayerData (router 1; NerdLib, constructor 1417F3250): the player's own object, one per console. Its vars in
@@ -376,6 +457,31 @@ def write_fields(msg, fields):
                 w.bits(len(f[2]), f[1])
             w.bits(int.from_bytes(f[2], 'little'), 8 * len(f[2]))
     return w
+
+
+# Ownership (NerdLib SyncedObjectManager; 1417B18C0 sends the request, ClientSyncedObjectManager 1417AB720 reads the
+# grant). ObjectRequestOwnership (10, console -> server): router (4), the type (if the router has several), the
+# object's handle - the server's objects as (a=1, b=0). ObjectGrantOwnership (11, server -> console): router, the
+# handle (a=1, b=0 - asserted), then like an update of that object: seq u8 (the object's next, as the console
+# counts the server's updates of it) and a 14-bit payload size + payload (1417B1E70).
+OBJECT_REQUEST_OWNERSHIP, OBJECT_GRANT_OWNERSHIP = 10, 11
+
+
+def read_request_ownership(r):
+    router = r.bits(4)
+    idw, typew = ROUTERS.get(router, (None, None))
+    if idw is None:
+        raise ValueError(f'unknown router {router}')
+    o = dict(router=router, type=r.bits(typew) if typew else 0)
+    o.update(read_handle(r, idw))
+    return o
+
+
+def grant_ownership(router, id, seq, payload=None):
+    idw, _ = ROUTERS[router]
+    w = BitWriter().bits(OBJECT_GRANT_OWNERSHIP, 7).bits(router, 4).bits(1, 1).bits(0, 1).bits(id, idw)
+    w.bits(seq & 0xFF, 8).bits(payload.pos if payload else 0, 14)
+    return concat(w, payload) if payload else w
 
 
 def read_delete(r):

@@ -20,3 +20,4 @@ server/data/
 # local settings and secrets
 playit-secret.txt
 *.secret
+server/netsim.json

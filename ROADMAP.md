@@ -6,13 +6,6 @@ Found a bug or have a wish? Open an [issue](../../issues).
 
 **Legend:** 🚧 in progress · 📋 planned · 💡 idea (maybe) · ✅ done
 
-## 🚧 In progress
-
-- **Events online (coming in 1.0.7)** – start races together in online free roam: the leader sets up an event,
-  the others get the join prompt, everyone is on the starting grid, the race starts at the same moment, lap times
-  and results are shared, and afterwards everyone gets their rewards and goes back to free roam. Working in our
-  tests; now being tested between players over the internet.
-
 ## 📋 Planned
 
 - **Join without pressing X** – skip the *"Free roam session found – press X"* prompt.
@@ -23,10 +16,14 @@ Found a bug or have a wish? Open an [issue](../../issues).
 
 ## 💡 Ideas
 
-- Road trips together.
+- Road trips together (the game's online road trips, voting for the next event).
 - Player list for the host in the HORIZON CONNECT menu (who is connected).
 
 ## ✅ Done
+
+### 1.1.0
+- **Online events and races**: the leader starts an event, the others join; starting grid, shared start,
+  positions, lap times and results, rewards, back to free roam. Several races in a row; players who leave drop out.
 
 ### 1.0.6
 - Gamertags of the other players.

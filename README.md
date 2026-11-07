@@ -9,10 +9,7 @@ It tunnels through [playit.gg](https://playit.gg), so you don't have to forward 
 Everything needed is inside the mod folder; nothing else has to be installed.
 
 > 🚧 **Work in progress:** what's being worked on and what comes next → [ROADMAP.md](ROADMAP.md)
->
-> 🏁 **Coming in 1.0.7: online events and races with your friends** – start an event in online free roam, the
-> others get the join prompt, and you race together. It works in our tests and is now being tested between
-> players over the internet.
+
 
 ## Features
 
@@ -23,6 +20,9 @@ Everything needed is inside the mod folder; nothing else has to be installed.
 - **Hosting over the internet** without port forwarding: the built-in playit.gg agent makes a tunnel; your
   address stays the same, so friends only have to add it once.
 - **Joining starts the game's own *Private Free Roam Online*** – no menu digging.
+- **Races together** – the session leader starts an event, the others join from the game's prompt: starting
+  grid, shared start, positions and lap times, results and rewards, then back to free roam.
+- **Same weather and time of day** for everyone, collisions between players, the leader's star.
 - **Every player gets their own player id** automatically (and keeps their save).
 - German and English menu texts (follows the game's language).
 
@@ -36,7 +36,7 @@ This repository contains **no game files**. You need your own copy of the game.
 
 ## Install
 
-1. Download `Horizon-Connect-1.0.6.zip` from the [Releases](../../releases) page.
+1. Download `Horizon-Connect-1.1.0.zip` from the [Releases](../../releases) page.
 2. Unzip it and copy the folder `Horizon Connect` into `<Azimuth folder>\mods\`.
 3. Start the game. If Windows Firewall asks about `python` or `playitd`, allow it.
 
@@ -61,8 +61,8 @@ More detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - Liveries of others show once they were saved online in the paint shop.
 - Joining from the list starts free roam on the mainland (not Storm Island).
 - No traffic in online free roam yet.
-- Events (races) can't be started in online free roam in 1.0.6; trying it can lock the menu (restart the game).
-  Online races are coming in 1.0.7.
+- Only the session leader (star) can start an event, and at least two players must be in the session.
+- Road trips aren't supported yet.
 
 What's being worked on and what comes next: **[ROADMAP.md](ROADMAP.md)**.
 

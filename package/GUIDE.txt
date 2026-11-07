@@ -1,5 +1,5 @@
 =====================================================================
-  HORIZON CONNECT 1.0  -  Forza Horizon 2 online with your friends
+  HORIZON CONNECT 1.1  -  Forza Horizon 2 online with your friends
 =====================================================================
 
 Horizon Connect lets you drive together in Forza Horizon 2's online
@@ -131,7 +131,27 @@ don't have to install anything else.
 
 
 ---------------------------------------------------------------------
- 6. TROUBLESHOOTING
+ 6. RACE TOGETHER
+---------------------------------------------------------------------
+
+  1. The session leader (the star in the player list) drives to an
+     event in free roam and starts it as usual.
+  2. Everyone else gets the game's message that an event is starting
+     and can join it (about 15 seconds).
+  3. Everyone picks a car and waits on the starting grid. The race
+     starts for all at the same time.
+  4. After the race: results, rewards, and everyone drives on in free
+     roam. The leader can start the next one.
+
+  The race ends a few seconds after the last player crossed the line,
+  or 30 seconds after the first one. At least two players must be in
+  the session to start an event. To let someone else start events:
+  pause menu -> online player list -> the player -> "Make session
+  leader".
+
+
+---------------------------------------------------------------------
+ 7. TROUBLESHOOTING
 ---------------------------------------------------------------------
 
   "can't be reached" in the list
@@ -151,7 +171,8 @@ don't have to install anything else.
       the game.
 
   Started an event (race) online and the menu is stuck
-      Events don't work in online free roam yet. Restart the game.
+      The host has a version before 1.1. Restart the game; the host
+      updates.
 
   F12 does nothing
       F12 only works in free roam's pause menu (not in races, not in
@@ -170,22 +191,23 @@ don't have to install anything else.
 
 
 ---------------------------------------------------------------------
- 7. WHAT DOESN'T WORK (YET)
+ 8. WHAT DOESN'T WORK (YET)
 ---------------------------------------------------------------------
 
   - Up to 11 players per server.
-  - At the moment every player has the crown (session leader).
+  - The crown next to every name is the game's VIP badge, not the
+    session leader. The leader has the star in the player list.
   - You see the other players' liveries only once they were saved
     online in the paint shop.
-  - Collisions between players aren't sent yet.
   - Joining from the list starts free roam on the mainland (not on
     Storm Island).
+  - No traffic in online free roam, no road trips yet.
 
   What's being worked on: ROADMAP.md on GitHub.
 
 
 ---------------------------------------------------------------------
- 8. UNINSTALL
+ 9. UNINSTALL
 ---------------------------------------------------------------------
 
   Delete the folder  <Azimuth folder>\mods\Horizon Connect
