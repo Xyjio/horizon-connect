@@ -346,10 +346,17 @@ def relay_names(relay_addr):
     host = host.strip('[]')
     try:
         info = socket.getaddrinfo(host, int(port), type=socket.SOCK_DGRAM)[0]
+        data = b''
         with socket.socket(info[0], socket.SOCK_DGRAM) as s:
-            s.settimeout(0.5)
-            s.sendto(b'FH2N?', info[4])
-            data, _ = s.recvfrom(2048)
+            s.settimeout(0.7)
+            for attempt in range(3):         # over the internet a packet can get lost; the game keeps the name
+                s.sendto(b'FH2N?', info[4])  # it gets now, so it is worth asking again
+                try:
+                    data, _ = s.recvfrom(2048)
+                    break
+                except socket.timeout:
+                    if attempt == 2:
+                        raise
         if data.startswith(b'FH2N!'):
             for uid, tag in json.loads(data[5:]).items():
                 if isinstance(tag, str) and tag:
