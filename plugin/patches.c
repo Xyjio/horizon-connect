@@ -60,7 +60,16 @@ static void xuid_patch(void) {
 // jne at 1408E0658, so the wait is done at once (online traffic stays empty).
 static int g_skipTrafficWait;
 
+// [online] ShowLeaderHint=0 (default): the session leader's hint "You are the president - start events everyone can
+// join" is shown by NetworkFreeRoamLeaderInstructionComponent (140810920) and, with no server telling it to go,
+// stays on screen for the whole session. The patch makes that function return at once (ret instead of push rdi).
+static int g_showLeaderHint;
+
 static void game_patches(void) {
+  if (!g_showLeaderHint) {
+    static const BYTE orig[] = { 0x57, 0x48, 0x83, 0xEC, 0x40 }, ret[] = { 0xC3, 0x48, 0x83, 0xEC, 0x40 };
+    patch_bytes(GAME_BASE + (0x140810920 - 0x140000000ULL), orig, ret, 5, "HideLeaderHint", 1);
+  }
   if (g_skipTrafficWait) {
     static const BYTE orig[] = { 0x75, 0x0D }, nops[] = { 0x90, 0x90 };
     patch_bytes(GAME_BASE + (0x1408E0658 - 0x140000000ULL), orig, nops, 2, "SkipTrafficWait", 1);

@@ -897,6 +897,7 @@ static void start(const wchar_t *path) {
   g_fakeAssociation = GetPrivateProfileIntW(L"net", L"FakeAssociation", 0, g_ini);
   g_skipWeatherWait = GetPrivateProfileIntW(L"net", L"SkipWeatherWait", 0, g_ini);
   g_skipTrafficWait = GetPrivateProfileIntW(L"net", L"SkipTrafficWait", 0, g_ini);
+  g_showLeaderHint = GetPrivateProfileIntW(L"online", L"ShowLeaderHint", 0, g_ini);
   GetPrivateProfileStringW(L"net", L"ServerAddress", L"::1", g_serverIp6, 64, g_ini);
   g_serverPort = GetPrivateProfileIntW(L"net", L"ServerPort", 5101, g_ini);
   GetPrivateProfileStringW(L"net", L"LocalAddress", L"", g_localAddress, 256, g_ini);
