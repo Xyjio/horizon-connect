@@ -280,6 +280,7 @@ class Relay:
             n = max(n, len(deletes))
         print(f'{time.strftime("%H:%M:%S")} peer {peer.index} [{peer.addr[0]}]:{peer.addr[1]} dropped ({why}); '
               f'{n} objects deleted for the others', flush=True)
+        self.prompted.discard(peer.index)    # its index may come back with a new console, which needs the prompt
         if peer.index == self.leader:
             self.leader = None
         self.update_leader()
