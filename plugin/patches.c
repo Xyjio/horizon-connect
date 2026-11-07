@@ -62,13 +62,14 @@ static int g_skipTrafficWait;
 
 // [online] ShowLeaderHint=0 (default): the session leader's hint "You are the president - start events everyone can
 // join" is shown by NetworkFreeRoamLeaderInstructionComponent (140810920) and, with no server telling it to go,
-// stays on screen for the whole session. The patch makes that function return at once (ret instead of push rdi).
+// stays on screen for the whole session. The patch makes that function return at once (ret instead of its
+// first instruction, push rdi = 40 57).
 static int g_showLeaderHint;
 
 static void game_patches(void) {
   if (!g_showLeaderHint) {
-    static const BYTE orig[] = { 0x57, 0x48, 0x83, 0xEC, 0x40 }, ret[] = { 0xC3, 0x48, 0x83, 0xEC, 0x40 };
-    patch_bytes(GAME_BASE + (0x140810920 - 0x140000000ULL), orig, ret, 5, "HideLeaderHint", 1);
+    static const BYTE orig[] = { 0x40, 0x57, 0x48, 0x83, 0xEC, 0x40 }, ret[] = { 0xC3, 0x57, 0x48, 0x83, 0xEC, 0x40 };
+    patch_bytes(GAME_BASE + (0x140810920 - 0x140000000ULL), orig, ret, 6, "HideLeaderHint", 1);
   }
   if (g_skipTrafficWait) {
     static const BYTE orig[] = { 0x75, 0x0D }, nops[] = { 0x90, 0x90 };
