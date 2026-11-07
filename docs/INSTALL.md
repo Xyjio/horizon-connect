@@ -9,7 +9,7 @@
 ## 2. Install
 
 1. Back up your save first: copy `<Azimuth folder>\data\titles\1A96545B\saves` somewhere.
-2. Unpack `Horizon-Connect-1.0.6.zip`.
+2. Unpack `Horizon-Connect-1.1.0.zip`.
 3. Copy the folder `Horizon Connect` into `<Azimuth folder>\mods\`.
    `mods\Horizon Connect\mod.json` and `mods\Horizon Connect\plugins\` must be directly inside it.
 4. Check your player name – the name next to the round profile icon at the top right of Azimuth's start window.
@@ -69,20 +69,34 @@ Every time:
 
 Your game must keep running while you host.
 
-## 6. Troubleshooting
+## 6. Race together
+
+1. The session leader (star in the player list) drives to an event in free roam and starts it as usual, choosing
+   the event's options.
+2. Everyone else gets the game's prompt that an event is starting and can join it (about 15 seconds).
+3. Everyone picks a car and waits on the starting grid; the race starts for all at the same time.
+4. After the race: results, rewards, and everyone drives on in free roam. The leader can start the next one.
+
+A race ends a few seconds after the last player crossed the line, or 30 seconds after the first one. Players who
+leave the race or lose the connection drop out; the others race on. Only the host needs version 1.1.0 or newer for
+this.
+
+## 7. Troubleshooting
 
 - **"can't be reached"** – the host hasn't started the server, or you have different Horizon Connect versions.
   When a new version is out, the server list shows it at the top: A installs it, A again restarts the game.
 - **"Agent deleted" when hosting** – your playit agent was deleted on playit.gg: **Set up a new one** → A. You get a
   new address; send it to your friends. (A free playit account has room for one agent.)
-- **Started an event (race) online and the menu is stuck** – events don't work online in 1.0.6 (they're coming in
-  1.0.7); restart the game.
+- **Can't start an event** – only the session leader (star in the player list) can, and at least one other player
+  must be in the session. Make someone else the leader: pause menu → online player list → the player → *Make
+  session leader*.
+- **Started an event and the menu is stuck** – the host has a version before 1.1.0; restart the game, the host updates.
 - **Nothing happens after A / the search never ends** – try again from F12; if that doesn't help, restart the game.
 - **F12 does nothing** – it works only in free roam's pause menu (not in races, the Autoshow, …).
 - **The browser doesn't open when hosting** – check whether a window opened behind the game (Alt+Tab).
 - **Reporting a problem** – send `<Azimuth folder>\mods\Horizon Connect\plugins\HorizonConnect.log` (it is written anew at
   every start).
 
-## 7. Uninstall
+## 8. Uninstall
 
 Delete `<Azimuth folder>\mods\Horizon Connect`. Your original save is unchanged.

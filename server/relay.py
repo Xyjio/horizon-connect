@@ -42,7 +42,7 @@ is logged and dropped (the packet is still acked).
 """
 import itertools, json, math, os, socket, threading, time
 
-import nerd
+import nerd, netsim
 
 # Message ids are the order of the game's message table (names at 1422E4470).
 NAMES = dict(enumerate([
@@ -65,7 +65,9 @@ NAMES = dict(enumerate([
     'BucketListStatusChallengeStarted', 'BucketListStatusChallengeEnded', 'MsgDebugLog', 'MsgInactivePlayersPulled',
     'ServerTrafficMessage', 'ClientTrafficMessage', 'ServerTrafficFullRoute', 'ServerTrafficStationary',
     'ClientTrafficFullRoute', 'ClientTrafficStationary']))
-FORWARD_UNSEQUENCED = (20,)      # broken glass, passed on like a car (24, a part torn off a smashable, is read, not passed on yet)
+FORWARD_UNSEQUENCED = (20, 43)   # broken glass, a racer's score as it drives (MsgInProgressScoreUpdate): passed on like a car
+                                 # (24, a part torn off a smashable, is read, not passed on yet)
+FORWARD_SEQUENCED = (44, 45)     # MsgLapScore, MsgScoreKeyframe (a racer's lap and final score): passed on sequenced
 TRAFFIC = (16, 17, 71, 73, 74)   # the traffic director's messages (Turn 10's server ran it): read, not answered
 SERVER_OWNER = 0                 # owner index of the server's own objects in Peer.out_seq (consoles are 1..)
 # Online the time of day follows the server clock (StartNetworkSync, 14197AF90): seconds of day =
@@ -78,7 +80,13 @@ RESEND_GIVE_UP_S = 12.0          # ... until this long after they were first sen
 # updates a minute; one that sends this many is broken or hostile and is dropped, so memory stays bounded.
 MAX_HISTORY_PER_PEER = 5000
 OWN_ATTEMPT = 1
-SESSION_HOST = (6, 0)        # router, object id of the server's SessionHost
+# The lobby's objects (router 6) are the server's. Every console makes the GameOptions itself as the server's
+# objects 0 and 2 (CLobby, 140A2BF24 / 140A2BF84: handles flag 31, ids 2 and 0) - so the server's SessionHost
+# must not be 0 (it was until 1.0.6, which made that GameOptions unreachable). The leader asks for ownership of
+# GameOptions 0 when it starts an event (stateflow network.get_game_options_ownership).
+SESSION_HOST = (6, 1)        # router, object id of the server's SessionHost
+LOBBY_ROUTER = 6
+GAME_OPTIONS_IDS = (0, 2)    # made by every console, never created by the server
 QUIET_DROP_S = 15
 MAX_PACKET = 1500                # the game's packets are at most 1200 bytes; bigger ones aren't read
 MAX_PLAYERS = 12             # FH2's session size (gameServerPlatform maxAllowedPlayers)
@@ -109,6 +117,11 @@ class Peer:
         self.cars = 0
         self.collisions = 0
         self.traffic = 0
+        self.car_id = None                   # its car's object id (from its CarPredictionFull)
+        self.ready = False                   # it said it is ready for the event (MsgReadyRequest)
+        self.console_vars = {}               # its ConsoleSynced vars as it set them
+        self.finished = False                # in the event: it sent its final score (MsgScoreKeyframe)
+        self.last_fields = {}                # message id -> (fields, time) last passed on (it repeats them)
         self.unacked = {}                    # our packet id -> (sent at, first sent at, msgs): waiting for its ack
         self.resent = 0
         self.bad = 0                         # packets that couldn't be read
@@ -129,6 +142,11 @@ class Relay:
         else:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind((host, port))
+        sim = netsim.load(os.path.dirname(os.path.abspath(__file__)))
+        if sim:                              # testing only: a bad line to the players who come through the tunnel
+            self.sock = netsim.SimSocket(self.sock, sim)
+            print(f'TEST: simulated internet for tunnel players: {sim["delay"] * 1000:.0f} ms + up to '
+                  f'{sim["jitter"] * 1000:.0f} ms each way, {sim["loss"]:.0%} of packets lost each way', flush=True)
         self.mu = threading.RLock()
         self.t0 = time.monotonic() - (start_hour % 24) * 3600 / TOD_SCALE   # server clock at start: start_hour o'clock
         self.peers = {}
@@ -143,6 +161,11 @@ class Relay:
         self.next_weather = {}               # 'a' / 'p' -> when to ask for new atmosphere / precipitation data
         self.n = 0
         self.strangers = 0                   # packets from addresses that aren't consoles (ignored)
+        self.owners = {}                     # (router, id) of a server object -> peer index that was granted it
+        self.event = {}                      # the SessionHost's event vars as set so far
+        self.event_state, self.event_due, self.event_start, self.participants = None, 0, 0, []
+        self.grants = {}                     # (router, id) -> (peer index, when) of the last ownership grant
+        self.lobby_seq = {}                  # (router, id) -> the owner's last update seq
         self.names = {}                      # xuid (text) -> gamertag, from the consoles' PlayerData
         print(f'fh2srv game UDP (relay) on [{host}]:{port}' + (f', leader: player {leader_xuid} when present' if leader_xuid else ''), flush=True)
 
@@ -279,8 +302,14 @@ class Relay:
         return nerd.server_update(router, id, seq, payload)
 
     def set_console_var(self, peer, index, value):
-        """One of the server's bools on the peer's own ConsoleSynced object."""
-        return self.server_var(peer, 3, peer.console_id, nerd.bool_var(index, value))
+        """One of the server's bools on the peer's own ConsoleSynced object (returned, for the peer). The others
+        see the same var on their copy of it: the event flow reads the others' Ready and ParticipatingInRace
+        (NetworkAnyRemoteConsolesReady, the grid and the participant list)."""
+        payload = nerd.bool_var(index, value)
+        for p in self.others(peer):
+            if (peer.index, 3, peer.console_id) in p.out_seq:
+                self.send_all(p, [self.relayed(p, peer.index, 8, 3, peer.console_id, payload)])
+        return self.server_var(peer, 3, peer.console_id, payload)
 
     # ---- the session leader (crown) -----------------------------------------------------------------------------
 
@@ -340,7 +369,7 @@ class Relay:
 
     # ---- the server's own objects and the weather ---------------------------------------------------------------
 
-    def server_object(self, to, msg, router, id, payload, only_new=False):
+    def server_object(self, to, msg, router, id, payload, only_new=False, type=0):
         """The server's object as an ObjectCreate/ObjectUpdate for `to` (handle flags 0, 0: the sender's own)."""
         key = (SERVER_OWNER, router, id)
         if msg == 7:
@@ -352,7 +381,191 @@ class Relay:
         else:
             seq = (to.out_seq[key] + 1) % 255
         to.out_seq[key] = seq
-        return nerd.object_msg(msg, router, id, seq, payload)
+        return nerd.object_msg(msg, router, id, seq, payload, type=type)
+
+    def session_host_payload(self):
+        """The SessionHost as it is now (for a create)."""
+        w = nerd.concat(nerd.session_host_vars(), nerd.session_host_update(**self.event)) if self.event else nerd.session_host_vars()
+        return w
+
+    def set_session_host(self, **values):
+        """Changes the server's SessionHost for everyone."""
+        self.event.update(values)
+        payload = nerd.session_host_update(**values)
+        for p in self.peers.values():
+            if p.synced:
+                m = self.server_object(p, 8, SESSION_HOST[0], SESSION_HOST[1], payload)
+                if m is not None:
+                    self.send_all(p, [m])
+        return ', '.join(f'{k}={v}' for k, v in values.items())
+
+    # The event, as Turn 10's server ran it (our reading of the game's flow, stateflow network_freeroam_states):
+    # the leader's MsgRequestRace makes the server race ready and starts a countdown ("An event starts soon" for the
+    # others). When it runs out, the consoles that said they are ready take part (ParticipatingInRace) and the
+    # participants are selected. Each then picks its car and loads the others' (it sets HasLoadedCarsForAllParticipants
+    # and waits for the route switch - if the server is InRace before that, it decides the event started without it).
+    # When all have loaded (or after a while): the starting grid, then the start time, and only then InRace.
+    EVENT_COUNTDOWN_MS = 20_000
+    EVENT_GATHER_MS = 60_000                 # longest wait for the participants to load
+    EVENT_START_DELAY_MS = 6_000
+    EVENT_FINISH_WINDOW_MS = 30_000      # after the first racer finishes, the others have this long
+    EVENT_END_DELAY_MS = 3_000           # after the last one: the results screen
+    EVENT_MAX_RACE_MS = 30 * 60_000      # nobody finished: over after this
+
+    def on_request_race(self, peer):
+        """The leader starts the event: the server is race ready and counts down."""
+        if peer.index != self.leader:
+            return '(not the leader: ignored)'
+        if self.event_state:
+            return f'(event already {self.event_state})'
+        end = self.now() + self.EVENT_COUNTDOWN_MS
+        self.event_state, self.event_due = 'countdown', end
+        note = '-> SessionHost ' + self.set_session_host(race_ready=1, countdown_type=1, countdown_end=end)
+        # The others get the leader's MsgRequestRace: their lobby fires NetworkRaceRequestingParticipants
+        # (1417F6FB0 -> CLobby 140A2DFB0), which shows the join prompt (race_starting_prompt). Who joins says
+        # it is ready (MsgReadyRequest) and takes part.
+        others = [p for p in self.peers.values() if p is not peer and p.synced]
+        for p in others:
+            self.send_all(p, [nerd.BitWriter().bits(nerd.MSG_REQUEST_RACE, 7)])
+        return note + f'; join prompt to {[p.index for p in others]}'
+
+    def on_ready_request(self, peer, fields):
+        ready = bool(fields[1][2])
+        peer.ready = ready
+        self.send_all(peer, [self.set_console_var(peer, nerd.CONSOLE_READY, ready), nerd.ready_response(0)])
+        note = f'{fields[0][2]} ready={int(ready)} -> Ready set, response 0'
+        if not ready and peer in self.participants and self.event_state not in (None, 'countdown'):
+            # it left the event (or gave up waiting for it): it no longer takes part; with nobody left the
+            # event is over (event_tick)
+            self.participants.remove(peer)
+            self.send_all(peer, [self.set_console_var(peer, nerd.CONSOLE_PARTICIPATING_IN_RACE, False)])
+            note += '; left the event'
+        return note
+
+    def on_final_score(self, peer):
+        """A racer crossed the line (its MsgScoreKeyframe). The race ends when all have, or a while after the
+        first one: then InRace goes off, which lets the results screen go on (NetworkWaitForRaceEnd 1408EEB20
+        waits for SessionHost InRace = 0) to the rewards and back to free roam."""
+        if self.event_state != 'racing' or peer not in self.participants or peer.finished:
+            return ''
+        peer.finished = True
+        now = self.now()
+        if all(p.finished for p in self.participants):
+            self.event_due = now + self.EVENT_END_DELAY_MS
+            return '-> all finished'
+        if not any(p.finished for p in self.participants if p is not peer):
+            self.event_due = now + self.EVENT_FINISH_WINDOW_MS
+        return '-> finished'
+
+    def event_reset(self, why):
+        for p in self.participants:
+            if p.addr in self.peers:
+                self.send_all(p, [self.set_console_var(p, nerd.CONSOLE_PARTICIPATING_IN_RACE, False)])
+            p.ready = p.finished = False
+        self.set_session_host(race_ready=0, participants_selected=0, in_race=0)
+        self.event_state, self.participants = None, []
+        print(f'{time.strftime("%H:%M:%S")} event: over ({why})', flush=True)
+
+    def event_tick(self):
+        now = self.now()
+        if not self.event_state:
+            return
+        self.participants = [p for p in self.participants if p.addr in self.peers]
+        if self.event_state != 'countdown' and not self.participants:
+            self.event_reset('no participants left')
+            return
+        if self.event_state == 'countdown' and now < self.event_due:
+            synced = [p for p in self.peers.values() if p.synced and p.console_id is not None]
+            if len(synced) > 1 and all(p.ready for p in synced):
+                self.event_due = now                 # everyone joined: no need to wait for the rest
+        if self.event_state == 'countdown' and now >= self.event_due:
+            self.participants = [p for p in self.peers.values() if p.synced and p.console_id is not None and p.ready]
+            if not self.participants:
+                self.event_reset('nobody ready')
+                return
+            for p in self.participants:
+                # what each says from here on counts, not what it said in the last event
+                for var in (nerd.CONSOLE_RENDER_READY, nerd.CONSOLE_HAS_LOADED_CARS, nerd.CONSOLE_HAS_GRID):
+                    p.console_vars.pop(var, None)
+                p.finished = False
+                self.send_all(p, [self.set_console_var(p, nerd.CONSOLE_PARTICIPATING_IN_RACE, True)])
+            self.set_session_host(participants_selected=1)
+            self.event_state, self.event_due = 'loading', now + self.EVENT_GATHER_MS
+            print(f'{time.strftime("%H:%M:%S")} event: participants {[p.index for p in self.participants]}', flush=True)
+        elif self.event_state == 'loading':
+            loaded = [p for p in self.participants if p.console_vars.get(nerd.CONSOLE_HAS_LOADED_CARS)]
+            if len(loaded) == len(self.participants) or now >= self.event_due:
+                cars = [p for p in loaded if p.car_id is not None]
+                for to in self.participants:
+                    grid = [dict(a=0, b=0, id=p.car_id) if p is to else dict(a=0, b=1, id=p.car_id, peer=p.index) for p in cars]
+                    self.send_all(to, [nerd.starting_grid(grid)])
+                    to.console_vars.pop(nerd.CONSOLE_RENDER_READY, None)   # from here: ready in the race scene
+                self.event_state, self.event_due = 'grid', now + self.EVENT_GATHER_MS
+                print(f'{time.strftime("%H:%M:%S")} event: grid {[(p.index, p.car_id) for p in cars]} '
+                      f'(loaded: {[p.index for p in loaded]})', flush=True)
+        elif self.event_state == 'grid':
+            # With the grid each console switches to the race route; it says RenderReady when the race scene is
+            # up (the starting grid screen). Then the start time goes out, a few seconds ahead.
+            rendered = [p for p in self.participants if p.console_vars.get(nerd.CONSOLE_RENDER_READY)]
+            if not rendered and now >= self.event_due:
+                self.event_reset('no console got to the starting grid')
+                return
+            if len(rendered) == len(self.participants) or now >= self.event_due:
+                start = now + self.EVENT_START_DELAY_MS
+                for to in self.participants:
+                    self.send_all(to, [nerd.start_race(start)])
+                self.event_state, self.event_due, self.event_start = 'starting', start, start
+                print(f'{time.strftime("%H:%M:%S")} event: start at {start} (render ready: {[p.index for p in rendered]})',
+                      flush=True)
+        elif self.event_state == 'starting' and now >= self.event_due:
+            self.set_session_host(in_race=1, race_start_time=self.event_start)
+            self.event_state, self.event_due = 'racing', now + self.EVENT_MAX_RACE_MS
+            print(f'{time.strftime("%H:%M:%S")} event: in race', flush=True)
+        elif self.event_state == 'racing' and now >= self.event_due:
+            self.event_reset('race over: ' + ', '.join(f'{p.index} {"finished" if p.finished else "not finished"}'
+                                                       for p in self.participants))
+
+    def on_request_ownership(self, peer, o):
+        """A console asks to own one of the server's objects (the leader: GameOptions, to set up an event). Granted
+        in the object's update sequence, so it is counted like the server's updates."""
+        key = (SERVER_OWNER, o['router'], o['id'])
+        made_by_console = o['router'] == LOBBY_ROUTER and o['id'] in GAME_OPTIONS_IDS
+        if not o['a'] or o['b'] or (key not in peer.out_seq and not made_by_console):
+            return '(not an object of the server it knows: ignored)'
+        granted = self.grants.get((o['router'], o['id']))
+        if granted and granted[0] == peer.index and time.monotonic() - granted[1] < 2:
+            return '(granted already)'                 # it asks every frame until the grant has arrived
+        self.grants[(o['router'], o['id'])] = (peer.index, time.monotonic())
+        seq = peer.out_seq[key] = (peer.out_seq.get(key, -1) + 1) % 255     # the console's own copy expects 0 first
+        self.send_all(peer, [nerd.grant_ownership(o['router'], o['id'], seq)])
+        self.owners[(o['router'], o['id'])] = peer.index
+        return f'-> granted (seq {seq})'
+
+    def on_lobby_update(self, peer, msg, o):
+        """An update of a lobby object from the console that owns it (the leader's GameOptions: the event it set
+        up) goes to the others as the server's update. Consoles make the GameOptions themselves, so the first
+        update another console gets from us is seq 0."""
+        key = (o['router'], o['id'])
+        if msg != 8 or not o['a'] or o['b'] or self.owners.get(key) != peer.index:
+            return '(not from its owner: ignored)'
+        if self.lobby_seq.get(key) == o['seq']:
+            return '(seen)'
+        self.lobby_seq[key] = o['seq']
+        sent = []
+        for p in self.peers.values():
+            if p is peer or not p.synced:
+                continue
+            okey = (SERVER_OWNER,) + key
+            msgs = []
+            # Its own copy was made by the console, not by us: whether it waits for update 0 or 1 first is not
+            # known, so the first update goes as both (the same values; one of them is taken, a repeat is
+            # harmless).
+            for _ in range(1 if okey in p.out_seq else 2):
+                seq = p.out_seq[okey] = (p.out_seq.get(okey, -1) + 1) % 255
+                msgs.append(nerd.object_msg(8, o['router'], o['id'], seq, o['payload'], console_made=True))
+            self.send_all(p, msgs)
+            sent.append(p.index)
+        return f'-> to {sent}'
 
     def ask_full_weather(self, peer):
         self.weather_asked = self.now()
@@ -446,7 +659,7 @@ class Relay:
         everything the others own."""
         self.send(peer, [nerd.time_sync(peer.sync_index, self.now()), nerd.sync_done(OWN_ATTEMPT)])
         peer.sync_index += 1
-        world = [nerd.object_msg(7, SESSION_HOST[0], SESSION_HOST[1], 0, nerd.session_host_vars(), type=0)]
+        world = [self.server_object(peer, 7, SESSION_HOST[0], SESSION_HOST[1], self.session_host_payload(), type=0)]
         if self.weather is not None:
             world.append(self.server_object(peer, 7, nerd.WEATHER_ROUTER, 0, nerd.weather_vars(self.weather)))
         for owner, msg, o in self.history:
@@ -568,10 +781,15 @@ class Relay:
                              + f' seq {o["seq"]} {o["payload"].pos} bits' + (' (resent)' if again else ''))
                 if again:
                     continue
+                if o['router'] == LOBBY_ROUTER:     # the lobby's objects belong to the server: an owner's changes
+                    notes.append(self.on_lobby_update(peer, msg, o))
+                    continue
                 if msg == 7:
                     self.seen.add(key)
                 if msg == 7 and o['router'] == 3:
                     peer.console_id = o['id']
+                if o['router'] == 3:
+                    peer.console_vars.update(nerd.read_console_vars(o['payload']))
                 if msg == 7 and o['router'] == nerd.PLAYER_ROUTER:
                     peer.player_id, peer.own_leader, new_player = o['id'], None, True
                     named = nerd.read_player_name(o['payload'])
@@ -591,6 +809,8 @@ class Relay:
                 if self.mirror is not None:
                     self.delayed.append((time.monotonic() + self.mirror, peer, nerd.car_msg(h['id'], body, peer=MIRROR_INDEX)))
                 peer.cars += 1
+                if not h['a'] and not h['b']:
+                    peer.car_id = h['id']
                 notes.append(name)
             elif msg == 21:
                 # MsgCarCollision: the car's handle, then 192 bits (all 1251 captured 2026-11-04 are followed by a
@@ -616,16 +836,31 @@ class Relay:
                 self.delete_object(peer, d['router'], d['id'])
             elif msg in nerd.MSG_FORMATS:
                 fields = nerd.read_fields(r, nerd.MSG_FORMATS[msg])
-                if msg in FORWARD_UNSEQUENCED:
-                    unseq.append(('fields', msg, fields))
+                if msg in FORWARD_UNSEQUENCED or msg in FORWARD_SEQUENCED:
+                    last = peer.last_fields.get(msg)
+                    if msg in FORWARD_SEQUENCED and last and last[0] == fields and time.monotonic() - last[1] < 5:
+                        notes.append(f'{name} (again)')       # sent again until acked: passed on once
+                        continue
+                    peer.last_fields[msg] = (fields, time.monotonic())
+                    (unseq if msg in FORWARD_UNSEQUENCED else seqd).append(('fields', msg, fields))
                     notes.append(name)
+                    if msg == nerd.MSG_SCORE_KEYFRAME:
+                        notes.append(self.on_final_score(peer))
                 elif msg in (nerd.FULL_WEATHER, nerd.ATMOSPHERE, nerd.PRECIPITATION):
                     notes.append(self.on_weather(peer, msg, fields))
+                elif msg == nerd.MSG_READY_REQUEST:
+                    notes.append(f'{name} ' + self.on_ready_request(peer, fields))
+                elif msg == nerd.MSG_REQUEST_RACE:
+                    notes.append(f'{name} ' + self.on_request_race(peer))
                 elif msg in TRAFFIC:
                     peer.traffic += 1
                     notes.append(name)
                 else:
                     notes.append(f'{name} (not handled)')
+            elif msg == nerd.OBJECT_REQUEST_OWNERSHIP:
+                o = nerd.read_request_ownership(r)
+                notes.append(f'{name} router {o["router"]} type {o["type"]} handle {o["a"]},{o["b"]} id {o["id"]} '
+                             + self.on_request_ownership(peer, o))
             elif msg == 59:
                 h = nerd.read_leader_change(r)
                 target = peer.index if not h['b'] else h.get('peer')
@@ -665,7 +900,16 @@ class Relay:
                 self.send_all(p, msgs, sequenced=False)
         if seqd:
             for p in self.others(peer):
-                msgs = [nerd.handle_msg(m, th) for m, h in seqd for th in [self.handle_for(h, peer, p)] if th is not None]
+                msgs = []
+                for item in seqd:
+                    if item[0] == 'fields':
+                        fields = [f if f[0] != 'h' else ('h', f[1], self.handle_for(f[2], peer, p)) for f in item[2]]
+                        if all(f[0] != 'h' or f[2] is not None for f in fields):
+                            msgs.append(nerd.write_fields(item[1], fields))
+                    else:
+                        th = self.handle_for(item[1], peer, p)
+                        if th is not None:
+                            msgs.append(nerd.handle_msg(item[0], th))
                 if msgs:
                     self.send_all(p, msgs)
         if out_seq:
@@ -742,8 +986,9 @@ class Relay:
                         self.resend(p)
                 try:
                     self.weather_tick()
+                    self.event_tick()
                 except Exception as e:           # never let one bad value stop the pings
-                    print(f'{time.strftime("%H:%M:%S")} weather: {type(e).__name__}: {e}', flush=True)
+                    print(f'{time.strftime("%H:%M:%S")} tick: {type(e).__name__}: {e}', flush=True)
 
 
 def start(out_dir, lock, port=5101, host='127.0.0.1', mirror=None, leader_xuid=None, start_hour=10.0):
