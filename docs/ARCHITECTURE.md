@@ -29,7 +29,9 @@ cars). Horizon Connect answers all of that on the players' own PCs.
 - `qos.c`, `assoc.c`, `party.c` – stand-ins for Windows.Xbox.Networking and Multiplayer.Party answers Azimuth
   gives offline (QoS measurements, secure device association, party registration).
 - `patches.c` – the player id (Azimuth's XboxUserId) and two waits the game would never finish without Turn 10's
-  traffic / weather service.
+  traffic / weather service. It also keeps the session leader's hint ("You are the president ...") from being
+  shown (`[online] ShowLeaderHint=0`): with no server to take it away it stayed all session, and showing it listed
+  the new leader twice in the online player list.
 - `online.c` – starts the local server (hidden, ends with the game), sets up and runs the playit agent,
   decides where the game's UDP goes (`online_set_join`), asks GitHub for the newest release (`CheckUpdates`),
   runs `update.py` / `restart.py` from the update row, and notices a playit agent deleted on playit.gg
@@ -66,7 +68,8 @@ cars). Horizon Connect answers all of that on the players' own PCs.
   then SessionHost InRace. Lobby event messages start with the handle of the SessionHost. Scores
   (MsgInProgressScoreUpdate, MsgLapScore, MsgScoreKeyframe) go to the others with the player handle translated;
   after the last finisher (or 30 s after the first) InRace goes off, which ends the results screen. A player who
-  says it is no longer ready drops out.
+  says it is no longer ready drops out. Every GameOptions update is kept, so a console that comes into the session later gets the whole
+  setup with its first one; a console that comes during the countdown gets the join prompt.
 - `netsim.py` – testing only: with a `netsim.json` next to `relay.py` (`{"delay_ms": 70, "jitter_ms": 50,
   "loss": 0.05}`), packets to and from the tunnel's players are delayed and dropped like on a bad line.
 - fh2srv answers only the game's requests (`X-Horizon-Host` and a 127.0.0.1 / localhost Host).
