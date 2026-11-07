@@ -166,11 +166,18 @@ class Relay:
         self.event_state, self.event_due, self.event_start, self.participants = None, 0, 0, []
         self.grants = {}                     # (router, id) -> (peer index, when) of the last ownership grant
         self.lobby_seq = {}                  # (router, id) -> the owner's last update seq
+        self.lobby_log = {}                  # (router, id) -> the owners' updates so far (all of them make the state)
+        self.prompted = set()                # peer indexes that got this event's join prompt (MsgRequestRace)
+        self.event_no = 0                    # events so far (for the log)
         self.names = {}                      # xuid (text) -> gamertag, from the consoles' PlayerData
         print(f'fh2srv game UDP (relay) on [{host}]:{port}' + (f', leader: player {leader_xuid} when present' if leader_xuid else ''), flush=True)
 
     def now(self):
         return int((time.monotonic() - self.t0) * 1000) + 1
+
+    def who(self, p):
+        """A peer for the log: its index and gamertag."""
+        return f'{p.index} {self.names.get(str(p.user), "?")}'
 
     def send(self, peer, msgs, sequenced=False, first=None):
         ack, ackbits = peer.acks.header()
@@ -276,8 +283,9 @@ class Relay:
         if peer.index == self.leader:
             self.leader = None
         self.update_leader()
-        if not self.peers:                   # the session is over: the next one gets its own weather
+        if not self.peers:                   # the session is over: the next one gets its own weather and lobby
             self.weather, self.weather_asked, self.next_weather = None, None, {}
+            self.lobby_log, self.lobby_seq, self.owners, self.grants = {}, {}, {}, {}
 
     def delete_object(self, peer, router, id):
         """A console deleted one of its objects: it goes from the history and from the others."""
@@ -420,14 +428,25 @@ class Relay:
             return f'(event already {self.event_state})'
         end = self.now() + self.EVENT_COUNTDOWN_MS
         self.event_state, self.event_due = 'countdown', end
+        self.event_no += 1
+        self.prompted = {peer.index}
+        print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: started by {self.who(peer)}', flush=True)
         note = '-> SessionHost ' + self.set_session_host(race_ready=1, countdown_type=1, countdown_end=end)
         # The others get the leader's MsgRequestRace: their lobby fires NetworkRaceRequestingParticipants
         # (1417F6FB0 -> CLobby 140A2DFB0), which shows the join prompt (race_starting_prompt). Who joins says
         # it is ready (MsgReadyRequest) and takes part.
         others = [p for p in self.peers.values() if p is not peer and p.synced]
         for p in others:
-            self.send_all(p, [nerd.BitWriter().bits(nerd.MSG_REQUEST_RACE, 7)])
+            self.join_prompt(p)
         return note + f'; join prompt to {[p.index for p in others]}'
+
+    def join_prompt(self, p):
+        """The event's join prompt for `p` (also for a console that came into the session during the countdown;
+        it first gets the event's GameOptions, which it hasn't had yet)."""
+        self.prompted.add(p.index)
+        for key in self.lobby_log:
+            self.send_lobby_state(p, key)
+        self.send_all(p, [nerd.BitWriter().bits(nerd.MSG_REQUEST_RACE, 7)])
 
     def on_ready_request(self, peer, fields):
         ready = bool(fields[1][2])
@@ -440,6 +459,7 @@ class Relay:
             self.participants.remove(peer)
             self.send_all(peer, [self.set_console_var(peer, nerd.CONSOLE_PARTICIPATING_IN_RACE, False)])
             note += '; left the event'
+            print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: {self.who(peer)} left', flush=True)
         return note
 
     def on_final_score(self, peer):
@@ -450,6 +470,8 @@ class Relay:
             return ''
         peer.finished = True
         now = self.now()
+        print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: {self.who(peer)} finished after '
+              f'{(now - self.event_start) / 1000:.1f} s', flush=True)
         if all(p.finished for p in self.participants):
             self.event_due = now + self.EVENT_END_DELAY_MS
             return '-> all finished'
@@ -463,17 +485,31 @@ class Relay:
                 self.send_all(p, [self.set_console_var(p, nerd.CONSOLE_PARTICIPATING_IN_RACE, False)])
             p.ready = p.finished = False
         self.set_session_host(race_ready=0, participants_selected=0, in_race=0)
-        self.event_state, self.participants = None, []
-        print(f'{time.strftime("%H:%M:%S")} event: over ({why})', flush=True)
+        self.event_state, self.participants, self.prompted = None, [], set()
+        print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: over ({why})', flush=True)
 
     def event_tick(self):
         now = self.now()
         if not self.event_state:
             return
+        gone = [p for p in self.participants if p.addr not in self.peers]
+        for p in gone:
+            print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: {self.who(p)} disconnected', flush=True)
         self.participants = [p for p in self.participants if p.addr in self.peers]
         if self.event_state != 'countdown' and not self.participants:
             self.event_reset('no participants left')
             return
+        if self.event_state == 'countdown':
+            # consoles that came into the session during the countdown get the join prompt too (once they
+            # have entered it: SessionEntryFinalised)
+            for p in self.peers.values():
+                if p.synced and p.finalised and p.index not in self.prompted:
+                    self.join_prompt(p)
+                    print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: join prompt for {self.who(p)} '
+                          f'(came during the countdown)', flush=True)
+        if self.event_state == 'racing' and all(p.finished for p in self.participants) \
+                and self.event_due > now + self.EVENT_END_DELAY_MS:
+            self.event_due = now + self.EVENT_END_DELAY_MS   # the ones still racing left: all there are finished
         if self.event_state == 'countdown' and now < self.event_due:
             synced = [p for p in self.peers.values() if p.synced and p.console_id is not None]
             if len(synced) > 1 and all(p.ready for p in synced):
@@ -491,7 +527,8 @@ class Relay:
                 self.send_all(p, [self.set_console_var(p, nerd.CONSOLE_PARTICIPATING_IN_RACE, True)])
             self.set_session_host(participants_selected=1)
             self.event_state, self.event_due = 'loading', now + self.EVENT_GATHER_MS
-            print(f'{time.strftime("%H:%M:%S")} event: participants {[p.index for p in self.participants]}', flush=True)
+            print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: participants '
+                  f'{", ".join(self.who(p) for p in self.participants)}', flush=True)
         elif self.event_state == 'loading':
             loaded = [p for p in self.participants if p.console_vars.get(nerd.CONSOLE_HAS_LOADED_CARS)]
             if len(loaded) == len(self.participants) or now >= self.event_due:
@@ -501,7 +538,7 @@ class Relay:
                     self.send_all(to, [nerd.starting_grid(grid)])
                     to.console_vars.pop(nerd.CONSOLE_RENDER_READY, None)   # from here: ready in the race scene
                 self.event_state, self.event_due = 'grid', now + self.EVENT_GATHER_MS
-                print(f'{time.strftime("%H:%M:%S")} event: grid {[(p.index, p.car_id) for p in cars]} '
+                print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: grid {[(p.index, p.car_id) for p in cars]} '
                       f'(loaded: {[p.index for p in loaded]})', flush=True)
         elif self.event_state == 'grid':
             # With the grid each console switches to the race route; it says RenderReady when the race scene is
@@ -515,14 +552,14 @@ class Relay:
                 for to in self.participants:
                     self.send_all(to, [nerd.start_race(start)])
                 self.event_state, self.event_due, self.event_start = 'starting', start, start
-                print(f'{time.strftime("%H:%M:%S")} event: start at {start} (render ready: {[p.index for p in rendered]})',
+                print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: start at {start} (render ready: {[p.index for p in rendered]})',
                       flush=True)
         elif self.event_state == 'starting' and now >= self.event_due:
             self.set_session_host(in_race=1, race_start_time=self.event_start)
             self.event_state, self.event_due = 'racing', now + self.EVENT_MAX_RACE_MS
-            print(f'{time.strftime("%H:%M:%S")} event: in race', flush=True)
+            print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: in race', flush=True)
         elif self.event_state == 'racing' and now >= self.event_due:
-            self.event_reset('race over: ' + ', '.join(f'{p.index} {"finished" if p.finished else "not finished"}'
+            self.event_reset('race over: ' + ', '.join(f'{self.who(p)} {"finished" if p.finished else "not finished"}'
                                                        for p in self.participants))
 
     def on_request_ownership(self, peer, o):
@@ -538,6 +575,8 @@ class Relay:
         self.grants[(o['router'], o['id'])] = (peer.index, time.monotonic())
         seq = peer.out_seq[key] = (peer.out_seq.get(key, -1) + 1) % 255     # the console's own copy expects 0 first
         self.send_all(peer, [nerd.grant_ownership(o['router'], o['id'], seq)])
+        if self.owners.get((o['router'], o['id'])) != peer.index:
+            self.lobby_seq.pop((o['router'], o['id']), None)   # a new owner counts its updates on its own
         self.owners[(o['router'], o['id'])] = peer.index
         return f'-> granted (seq {seq})'
 
@@ -551,21 +590,34 @@ class Relay:
         if self.lobby_seq.get(key) == o['seq']:
             return '(seen)'
         self.lobby_seq[key] = o['seq']
+        log = self.lobby_log.setdefault(key, [])
+        if len(log) < 500:
+            log.append(o['payload'])
         sent = []
         for p in self.peers.values():
             if p is peer or not p.synced:
                 continue
-            okey = (SERVER_OWNER,) + key
-            msgs = []
-            # Its own copy was made by the console, not by us: whether it waits for update 0 or 1 first is not
-            # known, so the first update goes as both (the same values; one of them is taken, a repeat is
-            # harmless).
-            for _ in range(1 if okey in p.out_seq else 2):
-                seq = p.out_seq[okey] = (p.out_seq.get(okey, -1) + 1) % 255
-                msgs.append(nerd.object_msg(8, o['router'], o['id'], seq, o['payload'], console_made=True))
-            self.send_all(p, msgs)
+            self.send_lobby_state(p, key, latest=o['payload'])
             sent.append(p.index)
         return f'-> to {sent}'
+
+    def send_lobby_state(self, p, key, latest=None):
+        """The leader's GameOptions for `p`: the latest update, or - if it got none yet (it came into the session
+        later) - all of them in order, which together are the whole state. Its own copy was made by the console,
+        not by us: whether it waits for update 0 or 1 first is not known, so the first update goes as both (the
+        same values; a repeat is harmless)."""
+        okey = (SERVER_OWNER,) + key
+        if okey in p.out_seq:
+            payloads = [latest] if latest is not None else []
+        else:
+            log = self.lobby_log.get(key, [])
+            payloads = [log[0]] + log if log else []
+        msgs = []
+        for payload in payloads:
+            seq = p.out_seq[okey] = (p.out_seq.get(okey, -1) + 1) % 255
+            msgs.append(nerd.object_msg(8, key[0], key[1], seq, payload, console_made=True))
+        if msgs:
+            self.send_all(p, msgs)
 
     def ask_full_weather(self, peer):
         self.weather_asked = self.now()
