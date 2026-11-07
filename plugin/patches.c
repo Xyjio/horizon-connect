@@ -61,15 +61,18 @@ static void xuid_patch(void) {
 static int g_skipTrafficWait;
 
 // [online] ShowLeaderHint=0 (default): the session leader's hint "You are the president - start events everyone can
-// join" is shown by NetworkFreeRoamLeaderInstructionComponent (140810920) and, with no server telling it to go,
-// stays on screen for the whole session. The patch makes that function return at once (ret instead of its
-// first instruction, push rdi = 40 57).
+// join" is shown by NetworkFreeRoamLeaderInstructionComponent and, with no server telling it to go, stays on screen
+// for the whole session. It is shown in two places: its update (140810920, made to return at once: ret instead of
+// its first instruction, push rdi = 40 57) and its handler for a new leader (140812FA0: the call to the show
+// function at 14081301C becomes five nops; the hide call for a player who isn't the leader stays).
 static int g_showLeaderHint;
 
 static void game_patches(void) {
   if (!g_showLeaderHint) {
     static const BYTE orig[] = { 0x40, 0x57, 0x48, 0x83, 0xEC, 0x40 }, ret[] = { 0xC3, 0x57, 0x48, 0x83, 0xEC, 0x40 };
     patch_bytes(GAME_BASE + (0x140810920 - 0x140000000ULL), orig, ret, 6, "HideLeaderHint", 1);
+    static const BYTE call[] = { 0xE8, 0x8F, 0xDC, 0xF3, 0xFF }, nops[] = { 0x90, 0x90, 0x90, 0x90, 0x90 };
+    patch_bytes(GAME_BASE + (0x14081301C - 0x140000000ULL), call, nops, 5, "HideLeaderHint (new leader)", 1);
   }
   if (g_skipTrafficWait) {
     static const BYTE orig[] = { 0x75, 0x0D }, nops[] = { 0x90, 0x90 };
