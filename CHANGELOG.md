@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.1
+
+- Fix: a player who came into the session after the leader had set up an event crashed when joining the next
+  event on the same route. Players who come later now get the event's whole setup.
+- A player who comes into the session (or comes back) while an event is counting down gets the join prompt too.
+- After the leader role was passed on, the new leader's event setup could be lost for the others; fixed.
+- A race ends right away when the players still racing leave and everyone left has finished.
+- The leader's hint "You are the president ..." no longer stays on screen all session (`ShowLeaderHint=1` in
+  `[online]` brings it back). It also showed the new leader twice in the online player list.
+- Gamertags of the others are asked for up to three times, so a lost packet no longer shows "Driver 1234".
+- The host's server log names each event, its players, finish times and why it ended.
+
 ## 1.1.0
 
 - **Online events and races.** The session leader (star) starts an event in online free roam as usual; the others

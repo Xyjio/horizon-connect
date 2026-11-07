@@ -21,6 +21,10 @@ Found a bug or have a wish? Open an [issue](../../issues).
 
 ## ✅ Done
 
+### 1.1.1
+- Fixes for races: players who join later, a new leader, joining during the countdown, ending when racers leave.
+- The leader hint no longer stays on screen; gamertags arrive over bad connections.
+
 ### 1.1.0
 - **Online events and races**: the leader starts an event, the others join; starting grid, shared start,
   positions, lap times and results, rewards, back to free roam. Several races in a row; players who leave drop out.

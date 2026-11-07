@@ -1,5 +1,5 @@
 =====================================================================
-  HORIZON CONNECT 1.1  -  Forza Horizon 2 online with your friends
+  HORIZON CONNECT 1.1.1  -  Forza Horizon 2 online with your friends
 =====================================================================
 
 Horizon Connect lets you drive together in Forza Horizon 2's online

@@ -36,7 +36,7 @@ This repository contains **no game files**. You need your own copy of the game.
 
 ## Install
 
-1. Download `Horizon-Connect-1.1.0.zip` from the [Releases](../../releases) page.
+1. Download `Horizon-Connect-1.1.1.zip` from the [Releases](../../releases) page.
 2. Unzip it and copy the folder `Horizon Connect` into `<Azimuth folder>\mods\`.
 3. Start the game. If Windows Firewall asks about `python` or `playitd`, allow it.
 
