@@ -57,8 +57,8 @@ The first time (once):
 
 1. Pause menu → F12 → **Host a server** → **Set up hosting** → A.
 2. Your browser opens playit.gg (free; it is how your friends reach you over the internet). Log in or sign up and
-   confirm.
-3. Alt+Tab back to the game. After a few seconds the page shows **Start the server and join** and your address.
+   confirm.(**Make sure your account is verified** or the game wont be able to setup a tunnel)
+3. Go back to the game. After a few seconds the page shows **Start the server and join** and your address.
 
 Every time:
 
@@ -71,7 +71,7 @@ Your game must keep running while you host.
 
 ## 6. Race together
 
-1. The session leader (star in the player list) drives to an event in free roam and starts it as usual, choosing
+1. The session leader (star in the player list) drives to a race in free roam and starts it as usual, choosing
    the event's options.
 2. Everyone else gets the game's prompt that an event is starting and can join it (about 15 seconds).
 3. Everyone picks a car and waits on the starting grid; the race starts for all at the same time.
