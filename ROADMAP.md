@@ -6,13 +6,13 @@ Found a bug or have a wish? Open an [issue](../../issues).
 
 **Legend:** 🚧 in progress · 📋 planned · 💡 idea (maybe) · ✅ done
 
+## 🚧 In progress
+- **Other events** - not only races but also Infected, King and Co-op bucket list.
 ## 📋 Planned
-
-- **Join without pressing X** – skip the *"Free roam session found – press X"* prompt.
 - **Storm Island** – join the online free roam on Storm Island, not only on the mainland.
 - **Traffic in online free roam** – the online free roam has no traffic cars yet (it came from Turn 10's
   servers).
-- **Liveries** – see the other players' liveries right away, without saving them online in the paint shop first.
+- **Liveries** – see the other players' liveries
 
 ## 💡 Ideas
 
