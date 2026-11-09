@@ -70,7 +70,7 @@ def load_models(game_exe):
         print('traffic: the game database (gamedbRC.slt) was not found; no online traffic', flush=True)
         return []
     try:
-        c = sqlite3.connect('file:' + p.replace('\\', '/') + '?mode=ro', uri=True)
+        c = sqlite3.connect(p)             # only read
         try:
             return sorted({int(r[0]) for r in c.execute('SELECT CarId FROM TrafficCars')})
         finally:
