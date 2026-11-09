@@ -1,5 +1,5 @@
 =====================================================================
-  HORIZON CONNECT 1.2.0  -  Forza Horizon 2 online with your friends
+  HORIZON CONNECT 1.2.1  -  Forza Horizon 2 online with your friends
 =====================================================================
 
 Horizon Connect lets you drive together in Forza Horizon 2's online
@@ -187,6 +187,10 @@ don't have to install anything else.
 
   Gas and reverse don't work (Azimuth Mapper)
       Press F6 once to leave the Mapper's mouse pointer mode.
+
+  "Azimuth stopped: activation ...ApplicationClipCapture"
+      The game tried to record a video clip (Game DVR), which
+      Azimuth can't do. Fixed in 1.2.1: update.
 
   Reporting a problem
       Send the person who gave you the mod the file

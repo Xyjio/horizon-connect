@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.1
+
+- Fix: the game could stop out of the blue with "Azimuth stopped: activation
+  Windows.Xbox.Media.Capture.ApplicationClipCapture" (naming HorizonConnect.dll). At notable moments the game
+  records a video clip (the Xbox's Game DVR), which Azimuth can't do. The plugin now turns those clips off with the
+  game's own switch for it. The error came from the game, not from online play - it could happen in solo free
+  roam too.
+
 ## 1.2.0
 
 - **King and Infected** (the Playground games) online. The session leader starts them like a race; the server says
