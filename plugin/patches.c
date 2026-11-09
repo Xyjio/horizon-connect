@@ -67,7 +67,78 @@ static int g_skipTrafficWait;
 // function at 14081301C becomes five nops; the hide call for a player who isn't the leader stays).
 static int g_showLeaderHint;
 
+// Placement textures (fallback ported from FH2MP's shim, GPL-3.0, https://github.com/Charelene/FH2MP,
+// shim/src/fh2mp_mod.c patch_placement_fallback). The game makes some textures with CreatePlacementTexture2D at
+// a memory address of its own; Azimuth supports only some descriptions and stops the whole game for the others
+// ("CreatePlacementTexture2D of semantics not carried ... at game+0x10c897b"). A car design with layers (vinyls)
+// is drawn into such a texture (1024x1024, 11 mips, CPU read access), so a player whose car wore one stopped at
+// every join. The game's one call site, in its wrapper 1410C88E0:
+//     1410C8971  mov rdx, r14 ; call qword ptr [r10+0x200] ; nop      49 8B D6 41 FF 92 00 02 00 00 90
+// becomes "call [rip+slot]" into placement_hook (same arguments): a supported description goes to Azimuth as it
+// was, another one is made as an ordinary texture (device vtable slot 5, CreateTexture2D) without the Xbox misc
+// flags. It doesn't share the game's memory at that address, so it may look wrong, but the game goes on.
+typedef long (*placement_fn)(void *dev, const unsigned *desc, unsigned tile, unsigned pitch, void *va, void **out);
+typedef long (*create2d_fn)(void *dev, const unsigned *desc, const void *init, void **out);
+static volatile LONG g_placementLogged;
+
+// desc: width, height, mips, slices, format, samples, quality, usage, bind, cpu access, misc
+static int placement_supported(const unsigned *d) {
+  if (d[7] == 0 && d[9] == 0 && (d[10] == 0 || ((d[10] - 0x20000u) & 0xfffdffffu) == 0) && d[2] == 1 && d[3] == 1 &&
+      (d[8] == 0x28 || d[8] == 0x48 || d[8] == 0xa8))
+    return 1;                                  // a GPU-written texture
+  return !(d[8] != 8 || d[9] != 0 || d[5] != 1 || d[2] == 0 || d[2] > 15 || d[3] > 0x800 || d[3] == 0 || d[7] > 1);
+}
+
+static long placement_hook(void *dev, const unsigned *desc, unsigned tile, unsigned pitch, void *va, void **out) {
+  void **vt = *(void ***)dev;
+  if (placement_supported(desc)) return ((placement_fn)vt[0x200 / 8])(dev, desc, tile, pitch, va, out);
+  unsigned copy[11];
+  memcpy(copy, desc, sizeof copy);
+  copy[10] &= 0xffffu;                         // keep the standard D3D11 misc flags only
+  long hr = ((create2d_fn)vt[5])(dev, copy, NULL, out);
+  if (InterlockedIncrement(&g_placementLogged) <= 20)
+    logf("placement texture %ux%u, %u mips, format %u, usage %u, bind 0x%x, cpu 0x%x, misc 0x%x: Azimuth would stop the "
+         "game, made as an ordinary texture (hr 0x%08lx)", desc[0], desc[1], desc[2], desc[4], desc[7], desc[8], desc[9], desc[10], hr);
+  return hr;
+}
+
+// A page within rel32 reach of `anchor` (for the pointer the patched call reads).
+static BYTE *alloc_near(BYTE *anchor) {
+  SYSTEM_INFO si; GetSystemInfo(&si);
+  ULONG_PTR lo = (ULONG_PTR)anchor > 0x7FF00000u ? (ULONG_PTR)anchor - 0x7FF00000u : 0;
+  ULONG_PTR hi = (ULONG_PTR)anchor + 0x7FF00000u;
+  if (lo < (ULONG_PTR)si.lpMinimumApplicationAddress) lo = (ULONG_PTR)si.lpMinimumApplicationAddress;
+  if (hi > (ULONG_PTR)si.lpMaximumApplicationAddress) hi = (ULONG_PTR)si.lpMaximumApplicationAddress;
+  for (ULONG_PTR a = lo & ~(ULONG_PTR)0xFFFF; a + 0x1000 <= hi; ) {
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!VirtualQuery((void *)a, &mbi, sizeof mbi)) break;
+    ULONG_PTR base = (ULONG_PTR)mbi.BaseAddress, end = base + mbi.RegionSize;
+    ULONG_PTR cand = (base + 0xFFFF) & ~(ULONG_PTR)0xFFFF;
+    if (mbi.State == MEM_FREE && cand >= lo && cand + 0x1000 <= end && cand + 0x1000 <= hi) {
+      BYTE *p = VirtualAlloc((void *)cand, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+      if (p) return p;
+    }
+    a = end > a ? end : a + 0x10000;
+  }
+  return NULL;
+}
+
+static void placement_patch(void) {
+  static const BYTE want[11] = { 0x49, 0x8B, 0xD6, 0x41, 0xFF, 0x92, 0x00, 0x02, 0x00, 0x00, 0x90 };
+  BYTE *site = GAME_BASE + (0x1410C8971 - 0x140000000ULL);
+  BYTE *slot = alloc_near(site);
+  if (!slot) { logf("patch PlacementFallback: no page near the game code, not applied"); return; }
+  *(void **)slot = (void *)placement_hook;
+  DWORD old; VirtualProtect(slot, 0x1000, PAGE_READONLY, &old);
+  LONG64 disp = (LONG64)(slot - (site + 3 + 6));
+  if (disp > 0x7fffffffLL || disp < -0x80000000LL) { logf("patch PlacementFallback: page out of reach, not applied"); return; }
+  BYTE call[8] = { 0xFF, 0x15, 0, 0, 0, 0, 0x90, 0x90 };   // call qword ptr [rip+disp32] ; nop ; nop
+  int d32 = (int)disp; memcpy(call + 2, &d32, 4);
+  if (patch_bytes(site + 3, want + 3, call, 8, "PlacementFallback", 1)) InterlockedExchange(&g_placementFix, 1);
+}
+
 static void game_patches(void) {
+  placement_patch();
   if (!g_showLeaderHint) {
     static const BYTE orig[] = { 0x40, 0x57, 0x48, 0x83, 0xEC, 0x40 }, ret[] = { 0xC3, 0x57, 0x48, 0x83, 0xEC, 0x40 };
     patch_bytes(GAME_BASE + (0x140810920 - 0x140000000ULL), orig, ret, 6, "HideLeaderHint", 1);

@@ -127,11 +127,12 @@ def retrieve_versioned_livery(params, ctx):
         return struct.pack('>III', 2, 1, 0)   # an error result
     with open(path, encoding='utf-8') as f:
         rec = json.load(f)
-    if rec.get('layers', 0):
+    if rec.get('layers', 0) and 'placement' not in ctx.get('fixes', ''):
         # A design with layers (vinyls) makes the game draw them into a 1024x1024 texture it can read back
         # (game+0x10C897B, CreatePlacementTexture2D with CPU read access), which Azimuth can't make: it stops the
-        # game, and from then on at every join, since the player's car carries the id. Without the record the
-        # game just shows the car's paint.
+        # game, and from then on at every join, since the player's car carries the id. The plugin's placement
+        # fallback (patches.c, X-Horizon-Fixes: placement) makes it an ordinary texture; without it the record
+        # isn't sent and the game just shows the car's paint.
         print(f'livery {lid} asked for by {ctx["xuid"]}: not sent ({rec["layers"]} layers would stop Azimuth)', flush=True)
         return struct.pack('>III', 2, 1, 0)
     p = rec['params']
@@ -499,7 +500,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 params, end = xls.decode(schema.find(ptype), body) if ptype else ({}, 0)
                 rec['lsp_params'] = params
-                ctx = {'body': body, 'end': end, 'xuid': self.headers.get('X-Horizon-Xuid', DEFAULT_XUID)}
+                ctx = {'body': body, 'end': end, 'xuid': self.headers.get('X-Horizon-Xuid', DEFAULT_XUID),
+                       'fixes': self.headers.get('X-Horizon-Fixes', '')}
                 reply, status, ctype = fn(params, ctx), 200, 'bin/xtsw'
                 rec['reply_hex'] = reply.hex()
             except Exception as e:

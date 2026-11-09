@@ -5,6 +5,9 @@
 #include <winhttp.h>
 #include <objidl.h>
 
+// set by patches.c once the CreatePlacementTexture2D fallback is in place
+static volatile LONG g_placementFix;
+
 static const GUID CLSID_FreeThreadedXMLHTTP60_ = { 0x88d96a09, 0xf192, 0x11d4, { 0xa6, 0x5f, 0x00, 0x40, 0x96, 0x32, 0x51, 0xe5 } };
 static const GUID IID_IXMLHTTPRequest2_ = { 0xe5d37dc0, 0x552a, 0x4d52, { 0x9c, 0xc0, 0xa1, 0x4d, 0x54, 0x6f, 0xbd, 0x04 } };
 static const GUID IID_IUnknown_x = { 0, 0, 0, { 0xc0, 0, 0, 0, 0, 0, 0, 0x46 } };
@@ -151,10 +154,11 @@ static DWORD WINAPI x_run(LPVOID param) {
   if (!r) { fail(x, HRESULT_FROM_WIN32(GetLastError()), "connect"); goto done; }
   // Who is asking: fh2srv writes session members and profile names from these (every console's Xbox Live
   // token is the same made-up one).
-  // X-Horizon-Relay: where fh2srv asks for the other players' gamertags.
+  // X-Horizon-Relay: where fh2srv asks for the other players' gamertags. X-Horizon-Fixes: game fixes in place
+  // (placement: designs with layers can be drawn, so fh2srv may send them; patches.c).
   wchar_t relay[96]; relay_where(relay, 96);
-  wchar_t fwd[640]; swprintf(fwd, 640, L"X-Horizon-Host: %ls\r\nX-Horizon-Scheme: %ls\r\nX-Horizon-Xuid: %ls\r\nX-Horizon-Gamertag: %ls\r\nX-Horizon-Relay: %ls\r\n",
-                             host, scheme, g_xuid, g_gamertag, relay);
+  wchar_t fwd[700]; swprintf(fwd, 700, L"X-Horizon-Host: %ls\r\nX-Horizon-Scheme: %ls\r\nX-Horizon-Xuid: %ls\r\nX-Horizon-Gamertag: %ls\r\nX-Horizon-Relay: %ls\r\nX-Horizon-Fixes: %ls\r\n",
+                             host, scheme, g_xuid, g_gamertag, relay, g_placementFix ? L"placement" : L"none");
   WinHttpAddRequestHeaders(r, fwd, (DWORD)-1L, WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
   if (x->headersLen) WinHttpAddRequestHeaders(r, x->headers, (DWORD)x->headersLen, WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
   if (!WinHttpSendRequest(r, WINHTTP_NO_ADDITIONAL_HEADERS, 0, x->body, x->bodyLen, x->bodyLen, 0) || !WinHttpReceiveResponse(r, NULL)) {
