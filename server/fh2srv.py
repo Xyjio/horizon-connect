@@ -9,7 +9,7 @@ gets 503.
 import argparse, datetime, hashlib, http.server, json, os, random, struct, sys, threading, uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import relay, xls
+import relay, traffic, xls
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--port', type=int, default=8090)
@@ -18,6 +18,7 @@ ap.add_argument('--game-port', type=int, default=5101, help="the relay's UDP por
 ap.add_argument('--game-host', default='127.0.0.1', help="the relay's address: 127.0.0.1 (this PC and the playit agent) or :: (also the LAN)")
 ap.add_argument('--mirror', type=float, help='testing alone: send each console itself back as a ghost player, its car this many seconds late')
 ap.add_argument('--start-hour', type=float, default=10.0, help='time of day (0-24) when the server starts; a game day lasts 30 minutes')
+ap.add_argument('--no-traffic', action='store_true', help='no online traffic (the consoles get no cars to show)')
 ap.add_argument('--leader-xuid', type=int, help="the host's player id: its console is the session leader (crown) when it joins")
 ap.add_argument('--game', default=os.environ.get('FH2_GAME', xls.EXE),
                 help='the FH2 game folder (Anthem_1.0.0.64_x64__8wekyb3d8bbwe) or its exe; the message schemas are read from it')
@@ -545,6 +546,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
 
-relay.start(args.out, lock, args.game_port, host=args.game_host, mirror=args.mirror, leader_xuid=args.leader_xuid, start_hour=args.start_hour)
+relay.start(args.out, lock, args.game_port, host=args.game_host, mirror=args.mirror, leader_xuid=args.leader_xuid, start_hour=args.start_hour,
+            traffic_models=[] if args.no_traffic else traffic.load_models(exe))
 print(f'fh2srv listening on {args.host}:{args.port}, captures in {args.out}', flush=True)
 http.server.ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()

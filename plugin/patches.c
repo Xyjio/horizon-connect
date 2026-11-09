@@ -60,6 +60,13 @@ static void xuid_patch(void) {
 // jne at 1408E0658, so the wait is done at once (online traffic stays empty).
 static int g_skipTrafficWait;
 
+// [net] TrafficOwnership=1 (default; patch from FH2MP, GPL-3.0, https://github.com/Charelene/FH2MP, shim/src/fh2mp_mod.c
+// patch_traffic_request_ownership): a console asks the server for a traffic car it hit (RequestOwnership, 140717410,
+// from the collision handler 140408AF0) only if the car's "can take" flag (+0xAA) is set, which is rarely the case, so
+// the car stayed with the console that drove it: the hitter saw it react, then snap back. The cmp/je at 140717445
+// (je = 74 7D) becomes two nops, so every hit asks (the game's own 2 s between requests stays).
+static int g_trafficOwnership = 1;
+
 // [online] ShowLeaderHint=0 (default): the session leader's hint "You are the president - start events everyone can
 // join" is shown by NetworkFreeRoamLeaderInstructionComponent and, with no server telling it to go, stays on screen
 // for the whole session. It is shown in two places: its update (140810920, made to return at once: ret instead of
@@ -154,6 +161,10 @@ static void game_patches(void) {
     patch_bytes(GAME_BASE + (0x140810920 - 0x140000000ULL), orig, ret, 6, "HideLeaderHint", 1);
     static const BYTE call[] = { 0xE8, 0x8F, 0xDC, 0xF3, 0xFF }, nops[] = { 0x90, 0x90, 0x90, 0x90, 0x90 };
     patch_bytes(GAME_BASE + (0x14081301C - 0x140000000ULL), call, nops, 5, "HideLeaderHint (new leader)", 1);
+  }
+  if (g_trafficOwnership) {
+    static const BYTE orig[] = { 0x80, 0xB9, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x74, 0x7D }, repl[] = { 0x80, 0xB9, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x90, 0x90 };
+    patch_bytes(GAME_BASE + (0x14071743E - 0x140000000ULL), orig, repl, 9, "TrafficOwnership", 1);
   }
   if (g_skipTrafficWait) {
     static const BYTE orig[] = { 0x75, 0x0D }, nops[] = { 0x90, 0x90 };

@@ -42,7 +42,7 @@ is logged and dropped (the packet is still acked).
 """
 import itertools, json, math, os, random, socket, threading, time
 
-import gameopts, nerd, netsim
+import gameopts, nerd, netsim, traffic
 
 # Message ids are the order of the game's message table (names at 1422E4470).
 NAMES = dict(enumerate([
@@ -68,7 +68,7 @@ NAMES = dict(enumerate([
 FORWARD_UNSEQUENCED = (20, 43)   # broken glass, a racer's score as it drives (MsgInProgressScoreUpdate): passed on like a car
                                  # (24, a part torn off a smashable, is read, not passed on yet)
 FORWARD_SEQUENCED = (44, 45)     # MsgLapScore, MsgScoreKeyframe (a racer's lap and final score): passed on sequenced
-TRAFFIC = (16, 17, 71, 73, 74)   # the traffic director's messages (Turn 10's server ran it): read, not answered
+TRAFFIC = (16, 17, 71, 73, 74)   # the traffic messages a console sends (traffic.py answers them)
 SERVER_OWNER = 0                 # owner index of the server's own objects in Peer.out_seq (consoles are 1..)
 # Online the time of day follows the server clock (StartNetworkSync, 14197AF90): seconds of day =
 # server ms / 1000 * 48 mod 86400, so a game day lasts 30 minutes. The clock starts at start_hour.
@@ -124,6 +124,7 @@ class Peer:
         self.collisions = 0
         self.traffic = 0
         self.car_id = None                   # its car's object id (from its CarPredictionFull)
+        self.pos = None                      # its car's position (x, y, z), from its CarPredictionFull
         self.ready = False                   # it said it is ready for the event (MsgReadyRequest)
         self.console_vars = {}               # its ConsoleSynced vars as it set them
         self.finished = False                # in the event: it sent its final score (MsgScoreKeyframe)
@@ -135,7 +136,8 @@ class Peer:
 
 
 class Relay:
-    def __init__(self, out_dir, lock, port=5101, host='127.0.0.1', mirror=None, leader_xuid=None, start_hour=10.0):
+    def __init__(self, out_dir, lock, port=5101, host='127.0.0.1', mirror=None, leader_xuid=None, start_hour=10.0,
+                 traffic_models=()):
         self.out_dir, self.lock = out_dir, lock
         self.mirror = mirror                 # seconds: each console also gets itself back as a ghost player
         self.leader_xuid = leader_xuid       # the host's player id: its console takes the crown when it joins
@@ -184,6 +186,7 @@ class Relay:
         self.event_loading_at = self.event_grid_at = None   # when the car select / the grid began (server ms)
         self.event_last_loaded_at = None     # when a participant last said it has loaded the cars
         self.names = {}                      # xuid (text) -> gamertag, from the consoles' PlayerData
+        self.traffic = traffic.World(TrafficHost(self), traffic_models)
         print(f'fh2srv game UDP (relay) on [{host}]:{port}' + (f', leader: player {leader_xuid} when present' if leader_xuid else ''), flush=True)
 
     def now(self):
@@ -294,6 +297,7 @@ class Relay:
     def drop(self, peer, why):
         """Forget a console: its objects go from the history, and the others delete them."""
         self.peers.pop(peer.addr, None)
+        self.traffic.leave(peer)
         if peer.index not in self.free:
             self.free.append(peer.index); self.free.sort()
         self.history = [h for h in self.history if h[0] != peer.index]
@@ -794,6 +798,31 @@ class Relay:
         t['repeats'] = [self.now() + x for x in self.TAG_REPEATS_MS[1:]]
         return '-> taken'
 
+    def on_traffic(self, peer, msg, fields):
+        val = pos = 0
+        for f in fields:                     # all plain numbers: one bit string, split as the traffic layouts
+            val |= f[2] << pos
+            pos += f[1]
+        if msg == traffic.MSG_SERVER_MESSAGE:
+            d = fields[1][2]
+            self.traffic.on_message(peer, fields[0][2], d & 0xFF, d >> 8 & 0x3FFF, d >> 22 & 0x1F, d >> 27 & 0xFF,
+                                    d >> 35 & 1, fields[2][2])
+        else:
+            out = []
+            for width in traffic.UPDATE_LAYOUT[msg]:
+                out.append(val & ((1 << width) - 1))
+                val >>= width
+            self.traffic.on_update(peer, msg, out)
+
+    def traffic_loop(self):
+        while True:
+            time.sleep(traffic.TICK_S / 2)
+            with self.mu:
+                try:
+                    self.traffic.tick()
+                except Exception as e:
+                    print(f'{time.strftime("%H:%M:%S")} traffic tick: {type(e).__name__}: {e}', flush=True)
+
     def on_request_ownership(self, peer, o):
         """A console asks to own one of the server's objects (the leader: GameOptions, to set up an event). Granted
         in the object's update sequence, so it is counted like the server's updates."""
@@ -1099,6 +1128,9 @@ class Relay:
                 peer.cars += 1
                 if not h['a'] and not h['b']:
                     peer.car_id = h['id']
+                    pos = tuple(traffic.f32(body.val >> (32 * i)) for i in range(3))
+                    if all(math.isfinite(x) and abs(x) < 1e6 for x in pos):
+                        peer.pos = pos
                 notes.append(name)
             elif msg == 21:
                 # MsgCarCollision: the car's handle, then 192 bits (all 1251 captured 2026-11-04 are followed by a
@@ -1118,6 +1150,7 @@ class Relay:
                     peer.finalised = True
                     out_seq.append(self.set_console_var(peer, nerd.CONSOLE_SESSION_ENTRY_FINALISED, True))
                     notes.append('-> SessionEntryFinalised')
+                    self.traffic.join(peer)
             elif msg == 9:
                 d = nerd.read_delete(r)
                 notes.append(f'{name} router {d["router"]} id {d["id"]} seq {d["seq"]}')
@@ -1145,6 +1178,7 @@ class Relay:
                 elif msg in TRAFFIC:
                     peer.traffic += 1
                     notes.append(name)
+                    self.on_traffic(peer, msg, fields)
                 else:
                     notes.append(f'{name} (not handled)')
             elif msg == nerd.OBJECT_REQUEST_OWNERSHIP:
@@ -1281,8 +1315,34 @@ class Relay:
                     print(f'{time.strftime("%H:%M:%S")} tick: {type(e).__name__}: {e}', flush=True)
 
 
-def start(out_dir, lock, port=5101, host='127.0.0.1', mirror=None, leader_xuid=None, start_hour=10.0):
-    relay = Relay(out_dir, lock, port, host, mirror, leader_xuid, start_hour)
+class TrafficHost:
+    """What traffic.World needs from the relay."""
+    BitWriter = nerd.BitWriter
+
+    def __init__(self, relay):
+        self.r = relay
+
+    def send(self, p, msgs, sequenced):
+        if p.addr in self.r.peers and msgs:
+            self.r.send_all(p, msgs, sequenced=sequenced)
+
+    def universe(self, p):
+        """Event participants have their own traffic (1), apart from free roam's (0)."""
+        return 1 if self.r.event_state and p in self.r.participants else 0
+
+    def car_pos(self, p):
+        return p.pos
+
+    def name(self, p):
+        return self.r.who(p)
+
+    def log(self, text):
+        print(f'{time.strftime("%H:%M:%S")} {text}', flush=True)
+
+
+def start(out_dir, lock, port=5101, host='127.0.0.1', mirror=None, leader_xuid=None, start_hour=10.0, traffic_models=()):
+    relay = Relay(out_dir, lock, port, host, mirror, leader_xuid, start_hour, traffic_models)
+    threading.Thread(target=relay.traffic_loop, daemon=True).start()
     threading.Thread(target=relay.run, daemon=True).start()
     if mirror is not None:
         threading.Thread(target=relay.mirror_cars, daemon=True).start()
