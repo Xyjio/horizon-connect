@@ -282,6 +282,10 @@ class Relay:
         print(f'{time.strftime("%H:%M:%S")} peer {peer.index} [{peer.addr[0]}]:{peer.addr[1]} dropped ({why}); '
               f'{n} objects deleted for the others', flush=True)
         self.prompted.discard(peer.index)    # its index may come back with a new console, which needs the prompt
+        for key in [k for k, i in self.owners.items() if i == peer.index]:
+            del self.owners[key]             # what it owned: the next owner (or it, back again) starts over
+            self.lobby_seq.pop(key, None)
+            self.grants.pop(key, None)
         if peer.index == self.leader:
             self.leader = None
         self.update_leader()
@@ -726,8 +730,9 @@ class Relay:
         self.grants[(o['router'], o['id'])] = (peer.index, time.monotonic())
         seq = peer.out_seq[key] = (peer.out_seq.get(key, -1) + 1) % 255     # the console's own copy expects 0 first
         self.send_all(peer, [nerd.grant_ownership(o['router'], o['id'], seq)])
-        if self.owners.get((o['router'], o['id'])) != peer.index:
-            self.lobby_seq.pop((o['router'], o['id']), None)   # a new owner counts its updates on its own
+        # the owner counts its updates anew after a grant (a console that left and came back with the same index
+        # starts at 0 again: its first update was taken for one already seen, and the others kept the old event)
+        self.lobby_seq.pop((o['router'], o['id']), None)
         self.owners[(o['router'], o['id'])] = peer.index
         return f'-> granted (seq {seq})'
 
