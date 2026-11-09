@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.2
+
+- Fix: a player whose car wore a design with vinyls (layers) saved online crashed at every join ("Azimuth stopped:
+  CreatePlacementTexture2D of semantics not carried"). The game draws such a design into a texture Azimuth can't
+  make; the plugin now makes it as an ordinary texture instead (the fallback comes from FH2MP, GPL-3.0). The
+  design may look a little wrong, the game goes on.
+- The local server sends designs with layers only to a game that has this fix.
+
 ## 1.1.1
 
 - Fix: a player who came into the session after the leader had set up an event crashed when joining the next

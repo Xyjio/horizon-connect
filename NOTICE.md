@@ -24,6 +24,11 @@ own collection type, hiding the pause page behind it) from:
 
 Both GPL-3.0.
 
+## FH2MP – GPL-3.0
+
+`plugin/patches.c` (`placement_patch`, `placement_hook`, `alloc_near`) ports the CreatePlacementTexture2D fallback
+from **FH2MP** by Charelene (github.com/Charelene/FH2MP, `shim/src/fh2mp_mod.c`), GPL-3.0.
+
 ## Shipped in the release package (not in this repository)
 
 | Component | Licence | File in the package |

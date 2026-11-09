@@ -36,7 +36,7 @@ This repository contains **no game files**. You need your own copy of the game.
 
 ## Install
 
-1. Download `Horizon-Connect-1.1.1.zip` from the [Releases](../../releases) page.
+1. Download `Horizon-Connect-1.1.2.zip` from the [Releases](../../releases) page.
 2. Unzip it and copy the folder `Horizon Connect` into `<Azimuth folder>\mods\`.
 3. Start the game. If Windows Firewall asks about `python` or `playitd`, allow it.
 
@@ -71,6 +71,7 @@ What's being worked on and what comes next: **[ROADMAP.md](ROADMAP.md)**.
 - **FH2Net** by conner-mcvay – the network hooks and the server this project grew from (MIT).
 - **Extra Options** by Arthur (RokkuDayo) and **EO Weather Control** (Set Time & Weather FH2 by Pantsedit) –
   the technique for native menu pages (GPL-3.0).
+- **FH2MP** by Charelene – the fallback for textures Azimuth can't make (GPL-3.0).
 - **playit.gg** agent (BSD-2-Clause), **Python** (PSF), **pefile** (MIT).
 
 See [`NOTICE.md`](NOTICE.md) for the licences.
