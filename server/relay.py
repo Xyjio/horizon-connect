@@ -40,9 +40,9 @@ stall that object for good. A message nobody acks is given up after RESEND_GIVE_
 Game messages carry no length, so a packet is read only as far as its messages are understood; the rest of it
 is logged and dropped (the packet is still acked).
 """
-import itertools, json, math, os, socket, threading, time
+import itertools, json, math, os, random, socket, threading, time
 
-import nerd, netsim
+import gameopts, nerd, netsim
 
 # Message ids are the order of the game's message table (names at 1422E4470).
 NAMES = dict(enumerate([
@@ -164,6 +164,7 @@ class Relay:
         self.owners = {}                     # (router, id) of a server object -> peer index that was granted it
         self.event = {}                      # the SessionHost's event vars as set so far
         self.event_state, self.event_due, self.event_start, self.participants = None, 0, 0, []
+        self.tag = None                      # the event's tag mode (King / Infection), if it is one (tag_start)
         self.grants = {}                     # (router, id) -> (peer index, when) of the last ownership grant
         self.lobby_seq = {}                  # (router, id) -> the owner's last update seq
         self.lobby_log = {}                  # (router, id) -> the owners' updates so far (all of them make the state)
@@ -469,13 +470,17 @@ class Relay:
         waits for SessionHost InRace = 0) to the rewards and back to free roam."""
         if self.event_state != 'racing' or peer not in self.participants or peer.finished:
             return ''
-        peer.finished = True
         now = self.now()
+        if self.tag and now - self.event_start < self.TAG_KEYFRAME_MIN_MS:
+            return '(tag mode: a score while playing, not the end)'
+        peer.finished = True
         print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: {self.who(peer)} finished after '
               f'{(now - self.event_start) / 1000:.1f} s', flush=True)
         if all(p.finished for p in self.participants):
             self.event_due = now + self.EVENT_END_DELAY_MS
             return '-> all finished'
+        if self.tag:
+            return '-> finished'                # a tag event ends at its time limit (or when all have finished)
         if not any(p.finished for p in self.participants if p is not peer):
             self.event_due = now + self.EVENT_FINISH_WINDOW_MS
         return '-> finished'
@@ -486,7 +491,7 @@ class Relay:
                 self.send_all(p, [self.set_console_var(p, nerd.CONSOLE_PARTICIPATING_IN_RACE, False)])
             p.ready = p.finished = False
         self.set_session_host(race_ready=0, participants_selected=0, in_race=0)
-        self.event_state, self.participants, self.prompted = None, [], set()
+        self.event_state, self.participants, self.prompted, self.tag = None, [], set(), None
         print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: over ({why})', flush=True)
 
     def event_tick(self):
@@ -530,6 +535,7 @@ class Relay:
             self.event_state, self.event_due = 'loading', now + self.EVENT_GATHER_MS
             print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: participants '
                   f'{", ".join(self.who(p) for p in self.participants)}', flush=True)
+            self.tag_start()
         elif self.event_state == 'loading':
             loaded = [p for p in self.participants if p.console_vars.get(nerd.CONSOLE_HAS_LOADED_CARS)]
             if len(loaded) == len(self.participants) or now >= self.event_due:
@@ -539,6 +545,8 @@ class Relay:
                     self.send_all(to, [nerd.starting_grid(grid)])
                     to.console_vars.pop(nerd.CONSOLE_RENDER_READY, None)   # from here: ready in the race scene
                 self.event_state, self.event_due = 'grid', now + self.EVENT_GATHER_MS
+                if self.tag:
+                    self.tag['assign_at'] = now + self.TAG_ASSIGN_DELAY_MS
                 print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: grid {[(p.index, p.car_id) for p in cars]} '
                       f'(loaded: {[p.index for p in loaded]})', flush=True)
         elif self.event_state == 'grid':
@@ -553,15 +561,157 @@ class Relay:
                 for to in self.participants:
                     self.send_all(to, [nerd.start_race(start)])
                 self.event_state, self.event_due, self.event_start = 'starting', start, start
+                if self.tag:
+                    t = self.tag
+                    if not t['assigned'] and t['assign_at'] is None:
+                        t['assign_at'] = start
+                    t['end_at'] = start + int(t['seconds'] * 1000)
+                    t['repeats'] = [now + 500, now + 2000]
                 print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: start at {start} (render ready: {[p.index for p in rendered]})',
                       flush=True)
         elif self.event_state == 'starting' and now >= self.event_due:
             self.set_session_host(in_race=1, race_start_time=self.event_start)
             self.event_state, self.event_due = 'racing', now + self.EVENT_MAX_RACE_MS
             print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: in race', flush=True)
-        elif self.event_state == 'racing' and now >= self.event_due:
+        if self.tag and self.event_state in ('grid', 'starting', 'racing'):
+            self.tag_tick(now)
+        if self.event_state == 'racing' and now >= self.event_due:
             self.event_reset('race over: ' + ', '.join(f'{self.who(p)} {"finished" if p.finished else "not finished"}'
                                                        for p in self.participants))
+
+    # ---- tag modes (King, Infection) ----------------------------------------------------------------------------
+    # Ported from FH2MP (GPL-3.0, https://github.com/Charelene/FH2MP, native/internal/game/events.go). The server
+    # says which cars are "It" (MsgTagBuckets, 37: twelve car handles, then each one's bucket, 8 bits: 0 not It,
+    # 1 It). A console that sees an It car touch another reports it (MsgTagCollision, 36: the two cars' handles and
+    # each one's bucket before and after); the server checks it against what it has, takes it and tells everyone.
+    # King: the crown passes to the car that was hit. Infection: the hit car becomes It too; when all are It (or
+    # at the time limit) the event is over.
+    MSG_TAG_COLLISION, MSG_TAG_BUCKETS = 36, 37
+    TAG_SLOTS, TAG_NOT_IT, TAG_IT = 12, 0, 1
+    TAG_ASSIGN_DELAY_MS = 1_500          # after the grid: the first It car(s)
+    TAG_RESYNC_MS = 3_000                # the buckets again, for a console that missed them
+    TAG_REPEATS_MS = (400, 1_200, 3_000)
+    TAG_KEYFRAME_MIN_MS = 20_000         # a final score sooner than this after the start is a score while playing
+    TAG_SECONDS = 300                    # the time limit when the leader didn't pick one
+    TAG_MODES = {gameopts.RACE_MODE_KING: ('King', 6), gameopts.RACE_MODE_INFECTION: ('Infection', 0)}
+
+    def tag_start(self):
+        """Is the event a tag mode? (from the leader's GameOptions, all of its updates merged)"""
+        self.tag = None
+        for key, log in self.lobby_log.items():
+            state = gameopts.merge([(u.pos, u.val) for u in log])
+            if state is None:
+                print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: options {key} can\'t be read', flush=True)
+                continue
+            mode = gameopts.tag_mode(*state)
+            print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: options {key}: {state[0]} bits, header '
+                  f'{state[1] & 0xFFFFFFFFFF:010x}' + (f', {self.TAG_MODES[mode][0]}' if mode else ''), flush=True)
+            if mode and not self.tag:
+                name, per_it = self.TAG_MODES[mode]
+                seconds = gameopts.max_time(*state) or self.TAG_SECONDS
+                self.tag = dict(name=name, per_it=per_it, seconds=seconds, guessed=mode == gameopts.RACE_MODE_KING,
+                                buckets={}, assigned=False, assign_at=None, end_at=None, sent_at=None, repeats=[], tags=0)
+        if self.tag:
+            print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: tag mode {self.tag["name"]}'
+                  + (' (assumed until the first tag)' if self.tag['guessed'] else '')
+                  + f', time limit {self.tag["seconds"]:g} s', flush=True)
+
+    def tag_people(self):
+        return [p for p in self.participants if p.addr in self.peers and p.car_id is not None]
+
+    def tag_send(self, why, quiet=False):
+        t = self.tag
+        t['sent_at'] = self.now()
+        people = self.tag_people()[:self.TAG_SLOTS]
+        for q in people:
+            w = nerd.BitWriter().bits(self.MSG_TAG_BUCKETS, 7)
+            for p in people:                 # own car (0,0,id), another console's (0,1,id,peer)
+                w.bits(0, 1).bits(0 if p is q else 1, 1).bits(p.car_id, 7)
+                if p is not q:
+                    w.bits(p.index, 8)
+            for _ in range(self.TAG_SLOTS - len(people)):
+                w.bits(0, 1).bits(1, 1).bits(127, 7).bits(0, 8)   # unused: no car
+            for p in people:
+                w.bits(t['buckets'].get(p.index, self.TAG_NOT_IT), 8)
+            for _ in range(self.TAG_SLOTS - len(people)):
+                w.bits(0, 8)
+            self.send_all(q, [w])
+        if not quiet:
+            print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: tag {why}: '
+                  + ' '.join(f'{self.who(p)}={"It" if t["buckets"].get(p.index) == self.TAG_IT else "-"}' for p in people),
+                  flush=True)
+
+    def tag_assign(self):
+        t, people = self.tag, self.tag_people()
+        if not people:
+            return
+        n = 1 if not t['per_it'] else max(1, -(-len(people) // t['per_it']))
+        t['buckets'] = {p.index: self.TAG_NOT_IT for p in people}
+        for p in random.sample(people, min(n, len(people))):
+            t['buckets'][p.index] = self.TAG_IT
+        t['assigned'] = True
+        self.tag_send('first It')
+
+    def tag_tick(self, now):
+        t = self.tag
+        if not t['assigned']:
+            if t['assign_at'] is not None and now >= t['assign_at']:
+                self.tag_assign()
+                t['repeats'] = [now + x for x in self.TAG_REPEATS_MS]
+            return
+        people = self.tag_people()
+        its = [p for p in people if t['buckets'].get(p.index) == self.TAG_IT]
+        if people and not its:               # the It car left
+            p = random.choice(people)
+            t['buckets'][p.index] = self.TAG_IT
+            self.tag_send(f'no It car left: {self.who(p)} is It now')
+        elif t['repeats'] and now >= t['repeats'][0]:
+            t['repeats'].pop(0)
+            self.tag_send('repeat', quiet=True)
+        elif now - (t['sent_at'] or now) >= self.TAG_RESYNC_MS:
+            self.tag_send('resync', quiet=True)
+        if self.event_state != 'racing' or self.event_due <= now:
+            return
+        if t['name'] == 'Infection' and len(people) > 1 and len(its) == len(people):
+            print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: everybody is infected', flush=True)
+            self.event_due = now
+        elif t['end_at'] is not None and now >= t['end_at'] + self.EVENT_END_DELAY_MS:
+            print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: time limit ({t["seconds"]:g} s)', flush=True)
+            self.event_due = now
+
+    def on_tag_collision(self, peer, fields):
+        t = self.tag
+        if not t or not t['assigned'] or self.event_state not in ('starting', 'racing'):
+            return '(no tag event running: ignored)'
+        k1, k2, v = fields[0][2], fields[1][2], fields[2][2]
+        old_a, new_a, old_b, new_b = v & 7, v >> 3 & 7, v >> 6 & 7, v >> 9 & 7
+
+        def car(k):
+            if k['a']:
+                return None
+            if not k['b']:
+                return peer                  # the sender's own car
+            return next((p for p in self.peers.values() if p.index == k.get('peer')), None)
+        a, b = car(k1), car(k2)
+        if a is None or b is None or a is b or a not in self.participants or b not in self.participants:
+            return '(cars not in the event: ignored)'
+        have_a, have_b = t['buckets'].get(a.index, self.TAG_NOT_IT), t['buckets'].get(b.index, self.TAG_NOT_IT)
+        if (have_a, have_b) != (old_a, old_b):
+            if (have_a, have_b) == (new_a, new_b):
+                return '(already known)'
+            return f'(stale: says {old_a}->{new_a} / {old_b}->{new_b}, the server has {have_a} / {have_b}: ignored)'
+        if (old_a == self.TAG_IT) == (old_b == self.TAG_IT) or max(new_a, new_b) > self.TAG_IT:
+            return f'(not a tag: {old_a}->{new_a} / {old_b}->{new_b}: ignored)'
+        if t['guessed']:
+            t['guessed'] = False
+            if (new_a if old_a == self.TAG_IT else new_b) == self.TAG_IT:
+                t['name'] = 'Infection'      # the It car stayed It
+        t['buckets'][a.index], t['buckets'][b.index] = new_a, new_b
+        t['tags'] += 1
+        self.tag_send(f'{self.who(a)} {old_a}->{new_a}, {self.who(b)} {old_b}->{new_b} ({t["name"]}, '
+                      f'reported by {self.who(peer)})')
+        t['repeats'] = [self.now() + x for x in self.TAG_REPEATS_MS[1:]]
+        return '-> taken'
 
     def on_request_ownership(self, peer, o):
         """A console asks to own one of the server's objects (the leader: GameOptions, to set up an event). Granted
@@ -905,6 +1055,8 @@ class Relay:
                     notes.append(f'{name} ' + self.on_ready_request(peer, fields))
                 elif msg == nerd.MSG_REQUEST_RACE:
                     notes.append(f'{name} ' + self.on_request_race(peer))
+                elif msg == self.MSG_TAG_COLLISION:
+                    notes.append(f'{name} ' + self.on_tag_collision(peer, fields))
                 elif msg in TRAFFIC:
                     peer.traffic += 1
                     notes.append(name)
