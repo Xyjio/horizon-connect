@@ -32,6 +32,13 @@ cars). Horizon Connect answers all of that on the players' own PCs.
   traffic / weather service. It also keeps the session leader's hint ("You are the president ...") from being
   shown (`[online] ShowLeaderHint=0`): with no server to take it away it stayed all session, and showing it listed
   the new leader twice in the online player list.
+- `guards.c` – crash guards ported from FH2MP (`[guards] Enabled`): each checks the game's code first and sends a
+  function (or one instruction) through a small stub in a code page just below the game image.
+  RemotePrediction (1409224DD: a network car whose player has no user in the session gets a stand-in user that says
+  no), GameplayLog (1409C88E0: an event for a user with no log record is left out), TorqueScale (14105E530: a missing
+  upgrade rowset is read as empty), TorqueLoad (140FCFE70: a car whose engine, camshaft or torque curve is missing
+  or unusable goes down the game's own unavailable-car path and shows as its stand-in car). Test switches
+  `TestForce` / `TestRejectCar` trigger the guards' other path on purpose.
 - `online.c` – starts the local server (hidden, ends with the game), sets up and runs the playit agent,
   decides where the game's UDP goes (`online_set_join`), asks GitHub for the newest release (`CheckUpdates`),
   runs `update.py` / `restart.py` from the update row, and notices a playit agent deleted on playit.gg
@@ -70,6 +77,14 @@ cars). Horizon Connect answers all of that on the players' own PCs.
   after the last finisher (or 30 s after the first) InRace goes off, which ends the results screen. A player who
   says it is no longer ready drops out. Every GameOptions update is kept, so a console that comes into the session later gets the whole
   setup with its first one; a console that comes during the countdown gets the join prompt.
+- Tag modes (King, Infected; `tag_*` in `relay.py`, rules from FH2MP): `gameopts.py` merges the leader's
+  GameOptions updates and tells a tag event from its values (Infected by its header, King otherwise - confirmed or
+  corrected by the first hit) and reads the time limit. 1.5 s after the grid the server picks the first It car(s)
+  (King: one per six players) and sends MsgTagBuckets (37: twelve car handles as each receiver knows them, then
+  their buckets, 0 / 1 = It) - again a few times and every 3 s. A console that sees an It car touch another sends
+  MsgTagCollision (36: both cars, their buckets before and after); the server takes it if it matches what it has
+  and sends the new buckets. The event ends at the time limit, or for Infected when everyone is It. The owner of the
+  lobby's GameOptions counts its updates anew after every grant.
 - `netsim.py` – testing only: with a `netsim.json` next to `relay.py` (`{"delay_ms": 70, "jitter_ms": 50,
   "loss": 0.05}`), packets to and from the tunnel's players are delayed and dropped like on a bad line.
 - fh2srv answers only the game's requests (`X-Horizon-Host` and a 127.0.0.1 / localhost Host).

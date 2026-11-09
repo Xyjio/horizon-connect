@@ -22,6 +22,8 @@ Everything needed is inside the mod folder; nothing else has to be installed.
 - **Joining starts the game's own *Private Free Roam Online*** – no menu digging.
 - **Races together** – the session leader starts an event, the others join from the game's prompt: starting
   grid, shared start, positions and lap times, results and rewards, then back to free roam.
+- **King and Infected** – the Playground games, with the crown or the infection passed on between players.
+- **Crash guards** for players coming and going and for cars with broken data (e.g. modded cars).
 - **Same weather and time of day** for everyone, collisions between players, the leader's star.
 - **Every player gets their own player id** automatically (and keeps their save).
 - German and English menu texts (follows the game's language).
@@ -36,7 +38,7 @@ This repository contains **no game files**. You need your own copy of the game.
 
 ## Install
 
-1. Download `Horizon-Connect-1.1.2.zip` from the [Releases](../../releases) page.
+1. Download `Horizon-Connect-1.2.0.zip` from the [Releases](../../releases) page.
 2. Unzip it and copy the folder `Horizon Connect` into `<Azimuth folder>\mods\`.
 3. Start the game. If Windows Firewall asks about `python` or `playitd`, allow it.
 
@@ -62,7 +64,7 @@ More detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - Joining from the list starts free roam on the mainland (not Storm Island).
 - No traffic in online free roam yet.
 - Only the session leader (star) can start an event, and at least two players must be in the session.
-- Road trips aren't supported yet.
+- Road trips and co-op Bucket List challenges aren't supported yet.
 
 What's being worked on and what comes next: **[ROADMAP.md](ROADMAP.md)**.
 
@@ -71,7 +73,7 @@ What's being worked on and what comes next: **[ROADMAP.md](ROADMAP.md)**.
 - **FH2Net** by conner-mcvay – the network hooks and the server this project grew from (MIT).
 - **Extra Options** by Arthur (RokkuDayo) and **EO Weather Control** (Set Time & Weather FH2 by Pantsedit) –
   the technique for native menu pages (GPL-3.0).
-- **FH2MP** by Charelene – the fallback for textures Azimuth can't make (GPL-3.0).
+- **FH2MP** by Charelene – the texture fallback, the crash guards and the King / Infected rules (GPL-3.0).
 - **playit.gg** agent (BSD-2-Clause), **Python** (PSF), **pefile** (MIT).
 
 See [`NOTICE.md`](NOTICE.md) for the licences.

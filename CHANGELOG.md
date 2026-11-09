@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.0
+
+- **King and Infected** (the Playground games) online. The session leader starts them like a race; the server says
+  who has the crown or is infected, takes the hits the games report and tells everyone. King ends at the time
+  limit the leader picked; Infected when everyone is infected (or at the time limit).
+- **Crash guards** (ported from FH2MP, GPL-3.0). The game no longer stops when:
+  - a player comes or goes just as the game updates the other cars;
+  - a car has broken engine data (for example a modded car) - it is shown as the game's own stand-in car;
+  - a car's upgrade data is missing;
+  - the game logs something for a player it has no record of.
+  `[guards] Enabled=0` switches them off.
+- Fix: when the session leader left and came back, the next event they set up didn't reach the others (they got
+  the previous event instead).
+- Only the host needs 1.2.0 for King and Infected; the crash guards help everyone who has them.
+
 ## 1.1.2
 
 - Fix: a player whose car wore a design with vinyls (layers) saved online crashed at every join ("Azimuth stopped:
