@@ -533,6 +533,7 @@ static const AzimuthLayout *azimuth_layout(void);
 #include "party.c"
 #include "assoc.c"
 #include "patches.c"
+#include "guards.c"
 
 // The Azimuth builds Horizon Connect knows (RVAs in azimuth.exe). A build is recognized by its LocalUser and
 // LocalUserStatics vtables holding the expected token functions in the slots it replaces; nothing is patched
@@ -641,6 +642,7 @@ static DWORD WINAPI worker(LPVOID p) {
   if (g_realSockets) real_sockets(GAME_BASE, "the game");
   if (g_fakeToken) install_token_hooks();
   game_patches();
+  crash_guards();
   trace_install(L"Game", GAME_BASE, 0x140000000ULL, "game");
   xhr_init();
   for (i = 0; i < 6000; i++) {     // up to ~10 minutes at 100 ms
@@ -661,8 +663,8 @@ static DWORD WINAPI worker(LPVOID p) {
 //    azimuth-tls.dll to stand in for any more (it loads azimuth-tls-1.dll, -2.dll as TLS slot modules), so
 //    Extra Options loads this DLL with its other plugins, on its loader thread, at the game's first file lookup.
 //    Then DllMain does nothing and FH2PluginInitialize starts it.
-#define HC_VERSION "1.1.2"
-#define HC_VERSION_W L"1.1.2"
+#define HC_VERSION "1.2.0-dev"
+#define HC_VERSION_W L"1.2.0-dev"
 static int g_pluginMode;
 
 // Azimuth's folder (where azimuth.exe is), with a trailing backslash.
@@ -898,6 +900,9 @@ static void start(const wchar_t *path) {
   g_skipWeatherWait = GetPrivateProfileIntW(L"net", L"SkipWeatherWait", 0, g_ini);
   g_skipTrafficWait = GetPrivateProfileIntW(L"net", L"SkipTrafficWait", 0, g_ini);
   g_showLeaderHint = GetPrivateProfileIntW(L"online", L"ShowLeaderHint", 0, g_ini);
+  g_guards = GetPrivateProfileIntW(L"guards", L"Enabled", 1, g_ini);
+  g_guardTestForce = GetPrivateProfileIntW(L"guards", L"TestForce", 0, g_ini);
+  g_guardTestCar = GetPrivateProfileIntW(L"guards", L"TestRejectCar", 0, g_ini);
   GetPrivateProfileStringW(L"net", L"ServerAddress", L"::1", g_serverIp6, 64, g_ini);
   g_serverPort = GetPrivateProfileIntW(L"net", L"ServerPort", 5101, g_ini);
   GetPrivateProfileStringW(L"net", L"LocalAddress", L"", g_localAddress, 256, g_ini);
