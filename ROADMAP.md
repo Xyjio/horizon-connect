@@ -21,6 +21,9 @@ Found a bug or have a wish? Open an [issue](../../issues).
 
 ## ✅ Done
 
+### 1.2.1
+- Fix for the game stopping with "ApplicationClipCapture" (the game's video clips are turned off).
+
 ### 1.2.0
 - **King and Infected** online.
 - Crash guards from FH2MP (players coming and going, modded cars with broken data, missing data).

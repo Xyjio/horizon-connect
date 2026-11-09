@@ -31,7 +31,9 @@ cars). Horizon Connect answers all of that on the players' own PCs.
 - `patches.c` – the player id (Azimuth's XboxUserId) and two waits the game would never finish without Turn 10's
   traffic / weather service. It also keeps the session leader's hint ("You are the president ...") from being
   shown (`[online] ShowLeaderHint=0`): with no server to take it away it stayed all session, and showing it listed
-  the new leader twice in the online player list.
+  the new leader twice in the online player list. It turns the game's Game DVR clips off (the game's own
+  `disableGameDVR` check is made to always skip): Azimuth can't activate `ApplicationClipCapture` and would stop
+  the game.
 - `guards.c` – crash guards ported from FH2MP (`[guards] Enabled`): each checks the game's code first and sends a
   function (or one instruction) through a small stub in a code page just below the game image.
   RemotePrediction (1409224DD: a network car whose player has no user in the session gets a stand-in user that says

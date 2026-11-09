@@ -23,7 +23,8 @@ Everything needed is inside the mod folder; nothing else has to be installed.
 - **Races together** – the session leader starts an event, the others join from the game's prompt: starting
   grid, shared start, positions and lap times, results and rewards, then back to free roam.
 - **King and Infected** – the Playground games, with the crown or the infection passed on between players.
-- **Crash guards** for players coming and going and for cars with broken data (e.g. modded cars).
+- **Crash guards** for players coming and going and for cars with broken data (e.g. modded cars), and the
+  game's video clips (Game DVR), which Azimuth can't record, are turned off.
 - **Same weather and time of day** for everyone, collisions between players, the leader's star.
 - **Every player gets their own player id** automatically (and keeps their save).
 - German and English menu texts (follows the game's language).
@@ -38,7 +39,7 @@ This repository contains **no game files**. You need your own copy of the game.
 
 ## Install
 
-1. Download `Horizon-Connect-1.2.0.zip` from the [Releases](../../releases) page.
+1. Download `Horizon-Connect-1.2.1.zip` from the [Releases](../../releases) page.
 2. Unzip it and copy the folder `Horizon Connect` into `<Azimuth folder>\mods\`.
 3. Start the game. If Windows Firewall asks about `python` or `playitd`, allow it.
 
