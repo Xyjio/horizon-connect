@@ -21,6 +21,9 @@ Found a bug or have a wish? Open an [issue](../../issues).
 
 ## ✅ Done
 
+### 1.1.2
+- Fix for the crash at every join with a car wearing a design with vinyls.
+
 ### 1.1.1
 - Fixes for races: players who join later, a new leader, joining during the countdown, ending when racers leave.
 - The leader hint no longer stays on screen; gamertags arrive over bad connections.
