@@ -137,8 +137,18 @@ static void placement_patch(void) {
   if (patch_bytes(site + 3, want + 3, call, 8, "PlacementFallback", 1)) InterlockedExchange(&g_placementFix, 1);
 }
 
+// Always: the game's Game DVR clips. At notable moments (140562160, called from several gameplay spots) the game
+// records a clip of the last seconds through Windows.Xbox.Media.Capture.ApplicationClipCapture (activated in
+// 1402BD580, from the task 140542B70). Azimuth doesn't support that class and stops the game ("activation
+// Windows.Xbox.Media.Capture.ApplicationClipCapture"; it names HorizonConnect.dll because the activation passes
+// our GetActivationFactory hook). The game has a debug switch for it (disableGameDVR, settings+0x3B7A, checked
+// at 14056219D); the patch makes that check always skip the recording (jne 1405621A4 -> jmp 14056233A).
 static void game_patches(void) {
   placement_patch();
+  {
+    static const BYTE orig[] = { 0x0F, 0x85, 0x90, 0x01, 0x00, 0x00 }, jmp[] = { 0x90, 0xE9, 0x90, 0x01, 0x00, 0x00 };
+    patch_bytes(GAME_BASE + (0x1405621A4 - 0x140000000ULL), orig, jmp, 6, "NoGameDVR", 1);
+  }
   if (!g_showLeaderHint) {
     static const BYTE orig[] = { 0x40, 0x57, 0x48, 0x83, 0xEC, 0x40 }, ret[] = { 0xC3, 0x57, 0x48, 0x83, 0xEC, 0x40 };
     patch_bytes(GAME_BASE + (0x140810920 - 0x140000000ULL), orig, ret, 6, "HideLeaderHint", 1);
