@@ -1,5 +1,5 @@
 =====================================================================
-  HORIZON CONNECT 1.1.2  -  Forza Horizon 2 online with your friends
+  HORIZON CONNECT 1.2.0  -  Forza Horizon 2 online with your friends
 =====================================================================
 
 Horizon Connect lets you drive together in Forza Horizon 2's online
@@ -148,6 +148,10 @@ don't have to install anything else.
   the session to start an event. To let someone else start events:
   pause menu -> online player list -> the player -> "Make session
   leader".
+
+  King and Infected (the Playground games) start the same way. The
+  crown or the infection passes on when cars touch. King ends at the
+  time limit, Infected when everyone is infected.
 
 
 ---------------------------------------------------------------------

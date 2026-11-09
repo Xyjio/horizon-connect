@@ -7,11 +7,10 @@ Found a bug or have a wish? Open an [issue](../../issues).
 **Legend:** 🚧 in progress · 📋 planned · 💡 idea (maybe) · ✅ done
 
 ## 🚧 In progress
-- **Other events** - not only races but also Infected, King and Co-op bucket list.
+- **Traffic in online free roam** – everyone sees the same traffic cars (built, being tested).
+- **Other events** – Co-op bucket list.
 ## 📋 Planned
 - **Storm Island** – join the online free roam on Storm Island, not only on the mainland.
-- **Traffic in online free roam** – the online free roam has no traffic cars yet (it came from Turn 10's
-  servers).
 - **Liveries** – see the other players' liveries
 
 ## 💡 Ideas
@@ -20,6 +19,11 @@ Found a bug or have a wish? Open an [issue](../../issues).
 - Player list for the host in the HORIZON CONNECT menu (who is connected).
 
 ## ✅ Done
+
+### 1.2.0
+- **King and Infected** online.
+- Crash guards from FH2MP (players coming and going, modded cars with broken data, missing data).
+- Fix: a leader who left and came back could start an event the others didn't get.
 
 ### 1.1.2
 - Fix for the crash at every join with a car wearing a design with vinyls.

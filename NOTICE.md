@@ -28,6 +28,9 @@ Both GPL-3.0.
 
 `plugin/patches.c` (`placement_patch`, `placement_hook`, `alloc_near`) ports the CreatePlacementTexture2D fallback
 from **FH2MP** by Charelene (github.com/Charelene/FH2MP, `shim/src/fh2mp_mod.c`), GPL-3.0.
+`plugin/guards.c` ports its crash guards (`shim/src/remote_prediction_guard.inc`, `gameplaylog_guard.inc`,
+`torque_scale.inc`, `torque_load_guard.inc`); `server/gameopts.py` and the tag modes in `server/relay.py` port its
+GameOptions reading and King / Infection rules (`native/internal/gameopts`, `native/internal/game/events.go`).
 
 ## Shipped in the release package (not in this repository)
 
