@@ -127,6 +127,13 @@ def retrieve_versioned_livery(params, ctx):
         return struct.pack('>III', 2, 1, 0)   # an error result
     with open(path, encoding='utf-8') as f:
         rec = json.load(f)
+    if rec.get('layers', 0):
+        # A design with layers (vinyls) makes the game draw them into a 1024x1024 texture it can read back
+        # (game+0x10C897B, CreatePlacementTexture2D with CPU read access), which Azimuth can't make: it stops the
+        # game, and from then on at every join, since the player's car carries the id. Without the record the
+        # game just shows the car's paint.
+        print(f'livery {lid} asked for by {ctx["xuid"]}: not sent ({rec["layers"]} layers would stop Azimuth)', flush=True)
+        return struct.pack('>III', 2, 1, 0)
     p = rec['params']
     data = {'profileId': 0, 'carId': p.get('carId', 0), 'numberOfLayers': rec.get('layers', 0),
             'creatorXuid': int(rec['xuid']), 'data': rec.get('data', ''),
