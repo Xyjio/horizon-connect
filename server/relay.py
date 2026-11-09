@@ -147,6 +147,11 @@ class Relay:
             self.sock = netsim.SimSocket(self.sock, sim)
             print(f'TEST: simulated internet for tunnel players: {sim["delay"] * 1000:.0f} ms + up to '
                   f'{sim["jitter"] * 1000:.0f} ms each way, {sim["loss"]:.0%} of packets lost each way', flush=True)
+        # testing only: with server\test-noload.txt the relay ignores that tunnel players have loaded their cars
+        # (as if their game hung on the loading screen) - for the load timeout
+        self.test_noload = os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test-noload.txt'))
+        if self.test_noload:
+            print('TEST: tunnel players never count as loaded (test-noload.txt)', flush=True)
         self.mu = threading.RLock()
         self.t0 = time.monotonic() - (start_hour % 24) * 3600 / TOD_SCALE   # server clock at start: start_hour o'clock
         self.peers = {}
@@ -420,7 +425,8 @@ class Relay:
     # and waits for the route switch - if the server is InRace before that, it decides the event started without it).
     # When all have loaded (or after a while): the starting grid, then the start time, and only then InRace.
     EVENT_COUNTDOWN_MS = 20_000
-    EVENT_GATHER_MS = 60_000                 # longest wait for the participants to load
+    EVENT_GATHER_MS = 60_000                 # longest wait for the participants to pick and load their cars;
+                                             # who hasn't loaded by then is taken out of the event (as FH2MP does)
     EVENT_START_DELAY_MS = 6_000
     EVENT_FINISH_WINDOW_MS = 30_000      # after the first racer finishes, the others have this long
     EVENT_END_DELAY_MS = 3_000           # after the last one: the results screen
@@ -541,8 +547,26 @@ class Relay:
                   f'{", ".join(self.who(p) for p in self.participants)}', flush=True)
             self.tag_start()
         elif self.event_state == 'loading':
-            loaded = [p for p in self.participants if p.console_vars.get(nerd.CONSOLE_HAS_LOADED_CARS)]
-            if len(loaded) == len(self.participants) or now >= self.event_due:
+            loaded = [p for p in self.participants if p.console_vars.get(nerd.CONSOLE_HAS_LOADED_CARS)
+                      and not (self.test_noload and p.addr[0] != '127.0.0.1')]
+            if len(loaded) < len(self.participants) and now >= self.event_due:
+                # A console that hasn't loaded the cars by now hangs on the loading screen (e.g. it can't load
+                # another player's car, a DLC or car pack car it doesn't have) or is far too slow. Waiting longer
+                # holds up everyone; sending the grid without it left it on the loading screen for good. So it
+                # leaves the event (ParticipatingInRace = 0 takes it back to free roam) and the others race on.
+                # Idea from FH2MP (GPL-3.0, native/internal/game/events.go DropUnloaded).
+                late = [p for p in self.participants if p not in loaded]
+                for p in late:
+                    self.participants.remove(p)
+                    p.ready = False
+                    self.send_all(p, [self.set_console_var(p, nerd.CONSOLE_PARTICIPATING_IN_RACE, False)])
+                print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: not loaded after '
+                      f'{self.EVENT_GATHER_MS // 1000} s, taken out of the event: '
+                      f'{", ".join(self.who(p) for p in late)}', flush=True)
+                if not self.participants:
+                    self.event_reset('nobody loaded the cars in time')
+                    return
+            if len(loaded) == len(self.participants):
                 cars = [p for p in loaded if p.car_id is not None]
                 for to in self.participants:
                     grid = [dict(a=0, b=0, id=p.car_id) if p is to else dict(a=0, b=1, id=p.car_id, peer=p.index) for p in cars]
