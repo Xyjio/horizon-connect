@@ -175,6 +175,7 @@ class Relay:
         self.lobby_log = {}                  # (router, id) -> the owners' updates so far (all of them make the state)
         self.prompted = set()                # peer indexes that got this event's join prompt (MsgRequestRace)
         self.event_no = 0                    # events so far (for the log)
+        self.event_loading_at = self.event_grid_at = None   # when the car select / the grid began (server ms)
         self.names = {}                      # xuid (text) -> gamertag, from the consoles' PlayerData
         print(f'fh2srv game UDP (relay) on [{host}]:{port}' + (f', leader: player {leader_xuid} when present' if leader_xuid else ''), flush=True)
 
@@ -427,6 +428,8 @@ class Relay:
     EVENT_COUNTDOWN_MS = 20_000
     EVENT_GATHER_MS = 60_000                 # longest wait for the participants to pick and load their cars;
                                              # who hasn't loaded by then is taken out of the event (as FH2MP does)
+    EVENT_GRID_MS = 240_000                  # longest wait for the race scene (route loaded) after the grid; a slow
+                                             # PC needs well over a minute (FH2MP: RaceGridBackstopSecs 240)
     EVENT_START_DELAY_MS = 6_000
     EVENT_FINISH_WINDOW_MS = 30_000      # after the first racer finishes, the others have this long
     EVENT_END_DELAY_MS = 3_000           # after the last one: the results screen
@@ -459,6 +462,18 @@ class Relay:
         for key in self.lobby_log:
             self.send_lobby_state(p, key)
         self.send_all(p, [nerd.BitWriter().bits(nerd.MSG_REQUEST_RACE, 7)])
+
+    def note_load_step(self, peer, changed):
+        """Log when a participant has loaded the cars and when its race scene is up (the host's log then says who
+        was slow or never got there)."""
+        now = self.now()
+        for var, what, since in ((nerd.CONSOLE_HAS_LOADED_CARS, 'loaded the cars', self.event_loading_at),
+                                 (nerd.CONSOLE_RENDER_READY, 'race scene up', self.event_grid_at)):
+            if changed.get(var) and not peer.console_vars.get(var) and since is not None:
+                if var == nerd.CONSOLE_RENDER_READY and self.event_state != 'grid':
+                    continue
+                print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: {self.who(peer)} {what} after '
+                      f'{(now - since) / 1000:.1f} s', flush=True)
 
     def on_ready_request(self, peer, fields):
         ready = bool(fields[1][2])
@@ -543,6 +558,7 @@ class Relay:
                 self.send_all(p, [self.set_console_var(p, nerd.CONSOLE_PARTICIPATING_IN_RACE, True)])
             self.set_session_host(participants_selected=1)
             self.event_state, self.event_due = 'loading', now + self.EVENT_GATHER_MS
+            self.event_loading_at, self.event_grid_at = now, None
             print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: participants '
                   f'{", ".join(self.who(p) for p in self.participants)}', flush=True)
             self.tag_start()
@@ -572,7 +588,7 @@ class Relay:
                     grid = [dict(a=0, b=0, id=p.car_id) if p is to else dict(a=0, b=1, id=p.car_id, peer=p.index) for p in cars]
                     self.send_all(to, [nerd.starting_grid(grid)])
                     to.console_vars.pop(nerd.CONSOLE_RENDER_READY, None)   # from here: ready in the race scene
-                self.event_state, self.event_due = 'grid', now + self.EVENT_GATHER_MS
+                self.event_state, self.event_due, self.event_grid_at = 'grid', now + self.EVENT_GRID_MS, now
                 if self.tag:
                     self.tag['assign_at'] = now + self.TAG_ASSIGN_DELAY_MS
                 print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: grid {[(p.index, p.car_id) for p in cars]} '
@@ -585,6 +601,12 @@ class Relay:
                 self.event_reset('no console got to the starting grid')
                 return
             if len(rendered) == len(self.participants) or now >= self.event_due:
+                if len(rendered) < len(self.participants):
+                    # as FH2MP does after its backstop: the race starts without them (they stay on the loading
+                    # screen until the event is over and ParticipatingInRace goes off)
+                    print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: no race scene after '
+                          f'{self.EVENT_GRID_MS // 1000} s, the race starts without: '
+                          f'{", ".join(self.who(p) for p in self.participants if p not in rendered)}', flush=True)
                 start = now + self.EVENT_START_DELAY_MS
                 for to in self.participants:
                     self.send_all(to, [nerd.start_race(start)])
@@ -1021,7 +1043,10 @@ class Relay:
                 if msg == 7 and o['router'] == 3:
                     peer.console_id = o['id']
                 if o['router'] == 3:
-                    peer.console_vars.update(nerd.read_console_vars(o['payload']))
+                    changed = nerd.read_console_vars(o['payload'])
+                    if self.event_state and peer in self.participants:
+                        self.note_load_step(peer, changed)
+                    peer.console_vars.update(changed)
                 if msg == 7 and o['router'] == nerd.PLAYER_ROUTER:
                     peer.player_id, peer.own_leader, new_player = o['id'], None, True
                     named = nerd.read_player_name(o['payload'])
