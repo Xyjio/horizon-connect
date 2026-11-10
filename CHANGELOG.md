@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.2
+
+- Fix: a player could stay on the loading screen for good after picking a car for an online race. That happened
+  when their game couldn't load the event (for example another player's car from a DLC or car pack they don't
+  have) or took longer than a minute to load the track - the race then started without them. Now:
+  - who hasn't loaded the cars 20 s after the others have (at the latest 60 s after the countdown) is taken out of
+    the event and is back in free roam; the others race on. If nobody loads, the event ends for everyone;
+  - the race waits up to 4 minutes for a slow PC to load the track (it was 1 minute).
+  Both as FH2MP (GPL-3.0) does it.
+- The host's server log says when each player loaded the cars and the track, and who was taken out.
+- Only the host needs 1.2.2.
+
 ## 1.2.1
 
 - Fix: the game could stop out of the blue with "Azimuth stopped: activation

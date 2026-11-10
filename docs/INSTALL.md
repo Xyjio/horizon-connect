@@ -9,7 +9,7 @@
 ## 2. Install
 
 1. Back up your save first: copy `<Azimuth folder>\data\titles\1A96545B\saves` somewhere.
-2. Unpack `Horizon-Connect-1.2.1.zip`.
+2. Unpack `Horizon-Connect-1.2.2.zip`.
 3. Copy the folder `Horizon Connect` into `<Azimuth folder>\mods\`.
    `mods\Horizon Connect\mod.json` and `mods\Horizon Connect\plugins\` must be directly inside it.
 4. Check your player name – the name next to the round profile icon at the top right of Azimuth's start window.
@@ -99,6 +99,9 @@ touch. King ends at the time limit the leader picked, Infected when everyone is 
 - **The browser doesn't open when hosting** – check whether a window opened behind the game (Alt+Tab).
 - **"Azimuth stopped: activation Windows.Xbox.Media.Capture.ApplicationClipCapture"** – the game tried to record a
   video clip; fixed in 1.2.1, update.
+- **A player stays on the loading screen after picking a car** – their game couldn't load the event (for example a
+  car from a DLC or car pack they don't have, or a very slow PC). Since 1.2.2 the host's server takes them out of the
+  event after a while: they are back in free roam and the others race on. The host needs 1.2.2.
 - **Reporting a problem** – send `<Azimuth folder>\mods\Horizon Connect\plugins\HorizonConnect.log` (it is written anew at
   every start).
 

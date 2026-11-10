@@ -77,7 +77,9 @@ cars). Horizon Connect answers all of that on the players' own PCs.
   then SessionHost InRace. Lobby event messages start with the handle of the SessionHost. Scores
   (MsgInProgressScoreUpdate, MsgLapScore, MsgScoreKeyframe) go to the others with the player handle translated;
   after the last finisher (or 30 s after the first) InRace goes off, which ends the results screen. A player who
-  says it is no longer ready drops out. Every GameOptions update is kept, so a console that comes into the session later gets the whole
+  says it is no longer ready drops out. A participant that hasn't loaded the cars 20 s after the last of the others
+  (35 s at the earliest, 60 s when nobody has) is taken out (ParticipatingInRace off: back to free roam), as FH2MP
+  does; the race scene gets up to 240 s after the grid. Every GameOptions update is kept, so a console that comes into the session later gets the whole
   setup with its first one; a console that comes during the countdown gets the join prompt.
 - Tag modes (King, Infected; `tag_*` in `relay.py`, rules from FH2MP): `gameopts.py` merges the leader's
   GameOptions updates and tells a tag event from its values (Infected by its header, King otherwise - confirmed or
