@@ -21,7 +21,8 @@ Everything needed is inside the mod folder; nothing else has to be installed.
   address stays the same, so friends only have to add it once.
 - **Joining starts the game's own *Private Free Roam Online*** – no menu digging.
 - **Races together** – the session leader starts an event, the others join from the game's prompt: starting
-  grid, shared start, positions and lap times, results and rewards, then back to free roam.
+  grid, shared start, positions and lap times, results and rewards, then back to free roam. A player whose game
+  can't load the event is taken out of it after a while (back to free roam) and the others race on.
 - **King and Infected** – the Playground games, with the crown or the infection passed on between players.
 - **Crash guards** for players coming and going and for cars with broken data (e.g. modded cars), and the
   game's video clips (Game DVR), which Azimuth can't record, are turned off.
