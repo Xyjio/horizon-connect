@@ -176,6 +176,7 @@ class Relay:
         self.prompted = set()                # peer indexes that got this event's join prompt (MsgRequestRace)
         self.event_no = 0                    # events so far (for the log)
         self.event_loading_at = self.event_grid_at = None   # when the car select / the grid began (server ms)
+        self.event_last_loaded_at = None     # when a participant last said it has loaded the cars
         self.names = {}                      # xuid (text) -> gamertag, from the consoles' PlayerData
         print(f'fh2srv game UDP (relay) on [{host}]:{port}' + (f', leader: player {leader_xuid} when present' if leader_xuid else ''), flush=True)
 
@@ -428,6 +429,9 @@ class Relay:
     EVENT_COUNTDOWN_MS = 20_000
     EVENT_GATHER_MS = 60_000                 # longest wait for the participants to pick and load their cars;
                                              # who hasn't loaded by then is taken out of the event (as FH2MP does)
+    EVENT_LOAD_MIN_MS = 35_000               # sooner when the others have loaded: the car select (20 s) is over by
+    EVENT_LOAD_AFTER_OTHERS_MS = 20_000      # then, and loading the cars took 1-2 s in tests; a hung console is
+                                             # taken out this long after the last of the others has loaded
     EVENT_GRID_MS = 240_000                  # longest wait for the race scene (route loaded) after the grid; a slow
                                              # PC needs well over a minute (FH2MP: RaceGridBackstopSecs 240)
     EVENT_START_DELAY_MS = 6_000
@@ -470,6 +474,8 @@ class Relay:
         for var, what, since in ((nerd.CONSOLE_HAS_LOADED_CARS, 'loaded the cars', self.event_loading_at),
                                  (nerd.CONSOLE_RENDER_READY, 'race scene up', self.event_grid_at)):
             if changed.get(var) and not peer.console_vars.get(var) and since is not None:
+                if var == nerd.CONSOLE_HAS_LOADED_CARS and not (self.test_noload and peer.addr[0] != '127.0.0.1'):
+                    self.event_last_loaded_at = now
                 if var == nerd.CONSOLE_RENDER_READY and self.event_state != 'grid':
                     continue
                 print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: {self.who(peer)} {what} after '
@@ -558,14 +564,18 @@ class Relay:
                 self.send_all(p, [self.set_console_var(p, nerd.CONSOLE_PARTICIPATING_IN_RACE, True)])
             self.set_session_host(participants_selected=1)
             self.event_state, self.event_due = 'loading', now + self.EVENT_GATHER_MS
-            self.event_loading_at, self.event_grid_at = now, None
+            self.event_loading_at, self.event_grid_at, self.event_last_loaded_at = now, None, None
             print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: participants '
                   f'{", ".join(self.who(p) for p in self.participants)}', flush=True)
             self.tag_start()
         elif self.event_state == 'loading':
             loaded = [p for p in self.participants if p.console_vars.get(nerd.CONSOLE_HAS_LOADED_CARS)
                       and not (self.test_noload and p.addr[0] != '127.0.0.1')]
-            if len(loaded) < len(self.participants) and now >= self.event_due:
+            due = self.event_due
+            if loaded and len(loaded) < len(self.participants) and self.event_last_loaded_at is not None:
+                due = min(due, max(self.event_loading_at + self.EVENT_LOAD_MIN_MS,
+                                   self.event_last_loaded_at + self.EVENT_LOAD_AFTER_OTHERS_MS))
+            if len(loaded) < len(self.participants) and now >= due:
                 # A console that hasn't loaded the cars by now hangs on the loading screen (e.g. it can't load
                 # another player's car, a DLC or car pack car it doesn't have) or is far too slow. Waiting longer
                 # holds up everyone; sending the grid without it left it on the loading screen for good. So it
@@ -577,7 +587,7 @@ class Relay:
                     p.ready = False
                     self.send_all(p, [self.set_console_var(p, nerd.CONSOLE_PARTICIPATING_IN_RACE, False)])
                 print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: not loaded after '
-                      f'{self.EVENT_GATHER_MS // 1000} s, taken out of the event: '
+                      f'{(now - self.event_loading_at) / 1000:.0f} s, taken out of the event: '
                       f'{", ".join(self.who(p) for p in late)}', flush=True)
                 if not self.participants:
                     self.event_reset('nobody loaded the cars in time')
