@@ -1,5 +1,5 @@
 =====================================================================
-  HORIZON CONNECT 1.2.1  -  Forza Horizon 2 online with your friends
+  HORIZON CONNECT 1.2.2  -  Forza Horizon 2 online with your friends
 =====================================================================
 
 Horizon Connect lets you drive together in Forza Horizon 2's online
@@ -191,6 +191,12 @@ don't have to install anything else.
   "Azimuth stopped: activation ...ApplicationClipCapture"
       The game tried to record a video clip (Game DVR), which
       Azimuth can't do. Fixed in 1.2.1: update.
+
+  A player stays on the loading screen after picking a car
+      Their game couldn't load the event (e.g. a DLC or car pack
+      car they don't have, or a very slow PC). Since 1.2.2 the
+      host's server takes them out of the event after a while:
+      back to free roam, the others race on. The host needs 1.2.2.
 
   Reporting a problem
       Send the person who gave you the mod the file
