@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.3
+
+- Fix: a player could be missing from the race positions (top right) of the others, while racing normally and
+  showing up again in free roam. It happened to players who joined a session that had been running for a while
+  (or joined again): the host's server sent them the session so far in packets of 2-3 KB, but the game reads at
+  most 1200 bytes. Those packets never arrived, and the other players' data in them stayed out of date for good.
+  Packets are now at most 1200 bytes.
+- Only the host needs 1.2.3.
+
 ## 1.2.2
 
 - Fix: a player could stay on the loading screen for good after picking a car for an online race. That happened

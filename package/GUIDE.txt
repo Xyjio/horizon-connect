@@ -1,5 +1,5 @@
 =====================================================================
-  HORIZON CONNECT 1.2.2  -  Forza Horizon 2 online with your friends
+  HORIZON CONNECT 1.2.3  -  Forza Horizon 2 online with your friends
 =====================================================================
 
 Horizon Connect lets you drive together in Forza Horizon 2's online
@@ -197,6 +197,10 @@ don't have to install anything else.
       car they don't have, or a very slow PC). Since 1.2.2 the
       host's server takes them out of the event after a while:
       back to free roam, the others race on. The host needs 1.2.2.
+
+  A player is missing from the race positions (top right)
+      Happened to players who joined a session that had been
+      running for a while. Fixed in 1.2.3 - the host needs it.
 
   Reporting a problem
       Send the person who gave you the mod the file
