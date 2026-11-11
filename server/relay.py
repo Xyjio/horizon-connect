@@ -89,6 +89,12 @@ LOBBY_ROUTER = 6
 GAME_OPTIONS_IDS = (0, 2)    # made by every console, never created by the server
 QUIET_DROP_S = 15
 MAX_PACKET = 1500                # the game's packets are at most 1200 bytes; bigger ones aren't read
+# What we send stays within the game's own packet size too. Before 1.2.3 a packet held up to 8 messages of any
+# size: the world for a console joining a long session (PlayerData updates of ~300 bytes each) went out in
+# packets of 2-3 KB, the console never acked them, they were given up, and the objects in them stalled for that
+# console for good (2026-11-11: the host was missing from the race positions of the two who joined later).
+MAX_SEND_BYTES = 1200
+MAX_SEND_MSGS = 8
 MAX_PLAYERS = 12             # FH2's session size (gameServerPlatform maxAllowedPlayers)
 # Peer indexes stay small and are reused: the game keeps per-peer state in a fixed-size table indexed by
 # the 8-bit peer index of a relay handle, so a large index reads past it (crash at game+F842E5 with
@@ -227,8 +233,23 @@ class Relay:
             self.send(peer, msgs, sequenced=True, first=first)
 
     def send_all(self, peer, msgs, sequenced=True):
-        for i in range(0, len(msgs), 8):     # a few messages per packet, well under the packet size limit
-            self.send(peer, msgs[i:i + 8], sequenced=sequenced)
+        for chunk in self.packets(msgs):
+            self.send(peer, chunk, sequenced=sequenced)
+
+    @staticmethod
+    def packets(msgs):
+        """The messages in packets of at most MAX_SEND_MSGS messages and MAX_SEND_BYTES bytes (a single larger
+        message goes alone)."""
+        limit = (MAX_SEND_BYTES - nerd.HEADER.size) * 8
+        chunk, bits = [], 0
+        for m in msgs:
+            if chunk and (len(chunk) >= MAX_SEND_MSGS or bits + m.pos > limit):
+                yield chunk
+                chunk, bits = [], 0
+            chunk.append(m)
+            bits += m.pos
+        if chunk:
+            yield chunk
 
     def others(self, peer):
         return [p for p in self.peers.values() if p is not peer and p.synced]
@@ -1182,7 +1203,7 @@ class Relay:
                 if msgs:
                     self.send_all(p, msgs)
         if out_seq:
-            self.send(peer, out_seq, sequenced=True)
+            self.send_all(peer, out_seq)
         reply = None
         if out or hdr['id'] != nerd.NO_SEQ:
             reply = self.send(peer, out)
