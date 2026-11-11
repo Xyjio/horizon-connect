@@ -65,7 +65,8 @@ cars). Horizon Connect answers all of that on the players' own PCs.
   server clock (48 game seconds per real second), so the clock starts at `--start-hour` (10:00). It also answers `FH2O?` with `FH2O!{"players": n, "max": m}` for the server list
   and `FH2N?` with the players' gamertags (`FH2N!{xuid: name}`, from each PlayerData), which every player's
   fh2srv asks when the game wants another player's profile (the DLL sends the relay's address in
-  `X-Horizon-Relay`). Its sequenced packets are kept until the console acks them and sent again after 0.4 s; a
+  `X-Horizon-Relay`). Its packets hold at most 8 messages and 1200 bytes (the game reads no more; a joiner's world
+  in bigger packets was lost before 1.2.3). Its sequenced packets are kept until the console acks them and sent again after 0.4 s; a
   packet it can't read is skipped; only an FH2 OpenConnection gets a player slot. It listens on 127.0.0.1 (the
   host's console and the playit agent) unless `--game-host ::` (`[online] OpenToLan=1`).
 - Events (races), also in `relay.py` (`event_tick`), as Turn 10's server ran them: the leader's console asks for

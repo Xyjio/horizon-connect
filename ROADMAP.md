@@ -21,6 +21,9 @@ Found a bug or have a wish? Open an [issue](../../issues).
 
 ## ✅ Done
 
+### 1.2.3
+- Fix for a player missing from the race positions of those who joined a long-running session.
+
 ### 1.2.2
 - Fix for a player staying on the loading screen after picking a car for a race (taken out of the event after a
   while, the others race on; slow PCs get more time to load the track).
