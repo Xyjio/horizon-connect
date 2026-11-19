@@ -42,7 +42,7 @@ is logged and dropped (the packet is still acked).
 """
 import itertools, json, math, os, random, socket, threading, time
 
-import gameopts, nerd, netsim, traffic
+import drivatars, gameopts, nerd, netsim, traffic
 
 # Message ids are the order of the game's message table (names at 1422E4470).
 NAMES = dict(enumerate([
@@ -133,11 +133,13 @@ class Peer:
         self.resent = 0
         self.bad = 0                         # packets that couldn't be read
         self.kept = 0                        # its entries in the relay's history
+        self.is_bot = False                  # a Drivatar: a player without a console (drivatars.py)
+        self.offset = (0.0, 0.0)             # a Drivatar's place next to the car it follows (x, z metres)
 
 
 class Relay:
     def __init__(self, out_dir, lock, port=5101, host='127.0.0.1', mirror=None, leader_xuid=None, start_hour=10.0,
-                 traffic_models=()):
+                 traffic_models=(), drivatar_names=()):
         self.out_dir, self.lock = out_dir, lock
         self.mirror = mirror                 # seconds: each console also gets itself back as a ghost player
         self.leader_xuid = leader_xuid       # the host's player id: its console takes the crown when it joins
@@ -187,6 +189,9 @@ class Relay:
         self.event_last_loaded_at = None     # when a participant last said it has loaded the cars
         self.names = {}                      # xuid (text) -> gamertag, from the consoles' PlayerData
         self.traffic = traffic.World(TrafficHost(self), traffic_models)
+        self.drivatar_names = list(drivatar_names)   # the single-player Drivatars' gamertags
+        self.bots = []                       # the Drivatars in the current event (Peer with is_bot)
+        self.bot_source = None               # the console whose objects and car they copy (the leader)
         print(f'fh2srv game UDP (relay) on [{host}]:{port}' + (f', leader: player {leader_xuid} when present' if leader_xuid else ''), flush=True)
 
     def now(self):
@@ -197,6 +202,8 @@ class Relay:
         return f'{p.index} {self.names.get(str(p.user), "?")}'
 
     def send(self, peer, msgs, sequenced=False, first=None):
+        if peer.is_bot:                      # a Drivatar has no console to send to
+            return b''
         ack, ackbits = peer.acks.header()
         pid = nerd.NO_SEQ
         if sequenced:
@@ -482,6 +489,7 @@ class Relay:
         others = [p for p in self.peers.values() if p is not peer and p.synced]
         for p in others:
             self.join_prompt(p)
+        self.bots_add(peer)
         return note + f'; join prompt to {[p.index for p in others]}'
 
     def join_prompt(self, p):
@@ -532,7 +540,7 @@ class Relay:
         peer.finished = True
         print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: {self.who(peer)} finished after '
               f'{(now - self.event_start) / 1000:.1f} s', flush=True)
-        if all(p.finished for p in self.participants):
+        if all(p.finished for p in self.participants if not p.is_bot):
             self.event_due = now + self.EVENT_END_DELAY_MS
             return '-> all finished'
         if self.tag:
@@ -549,16 +557,17 @@ class Relay:
         self.set_session_host(race_ready=0, participants_selected=0, in_race=0)
         self.event_state, self.participants, self.prompted, self.tag = None, [], set(), None
         print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: over ({why})', flush=True)
+        self.bots_remove('the event is over')
 
     def event_tick(self):
         now = self.now()
         if not self.event_state:
             return
-        gone = [p for p in self.participants if p.addr not in self.peers]
+        gone = [p for p in self.participants if not p.is_bot and p.addr not in self.peers]
         for p in gone:
             print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: {self.who(p)} disconnected', flush=True)
-        self.participants = [p for p in self.participants if p.addr in self.peers]
-        if self.event_state != 'countdown' and not self.participants:
+        self.participants = [p for p in self.participants if p.is_bot or p.addr in self.peers]
+        if self.event_state != 'countdown' and not any(not p.is_bot for p in self.participants):
             self.event_reset('no participants left')
             return
         if self.event_state == 'countdown':
@@ -569,7 +578,7 @@ class Relay:
                     self.join_prompt(p)
                     print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: join prompt for {self.who(p)} '
                           f'(came during the countdown)', flush=True)
-        if self.event_state == 'racing' and all(p.finished for p in self.participants) \
+        if self.event_state == 'racing' and all(p.finished for p in self.participants if not p.is_bot) \
                 and self.event_due > now + self.EVENT_END_DELAY_MS:
             self.event_due = now + self.EVENT_END_DELAY_MS   # the ones still racing left: all there are finished
         if self.event_state == 'countdown' and now < self.event_due:
@@ -590,9 +599,13 @@ class Relay:
             self.set_session_host(participants_selected=1)
             self.event_state, self.event_due = 'loading', now + self.EVENT_GATHER_MS
             self.event_loading_at, self.event_grid_at, self.event_last_loaded_at = now, None, None
+            self.tag_start()
+            if self.tag:
+                self.bots_remove('a tag event')     # King / Infected: players only
+            else:
+                self.bots_join()
             print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: participants '
                   f'{", ".join(self.who(p) for p in self.participants)}', flush=True)
-            self.tag_start()
         elif self.event_state == 'loading':
             loaded = [p for p in self.participants if p.console_vars.get(nerd.CONSOLE_HAS_LOADED_CARS)
                       and not (self.test_noload and p.addr[0] != '127.0.0.1')]
@@ -623,6 +636,8 @@ class Relay:
                     grid = [dict(a=0, b=0, id=p.car_id) if p is to else dict(a=0, b=1, id=p.car_id, peer=p.index) for p in cars]
                     self.send_all(to, [nerd.starting_grid(grid)])
                     to.console_vars.pop(nerd.CONSOLE_RENDER_READY, None)   # from here: ready in the race scene
+                for bot in self.bots:                # a Drivatar is in the race scene at once
+                    self.bot_console_var(bot, nerd.CONSOLE_RENDER_READY, True)
                 self.event_state, self.event_due, self.event_grid_at = 'grid', now + self.EVENT_GRID_MS, now
                 if self.tag:
                     self.tag['assign_at'] = now + self.TAG_ASSIGN_DELAY_MS
@@ -663,6 +678,87 @@ class Relay:
         if self.event_state == 'racing' and now >= self.event_due:
             self.event_reset('race over: ' + ', '.join(f'{self.who(p)} {"finished" if p.finished else "not finished"}'
                                                        for p in self.participants))
+
+    # ---- Drivatars (drivatars.py) ---------------------------------------------------------------------------------
+
+    def bots_add(self, src):
+        """The Drivatars for the event `src` (the leader) starts: copies of its player objects under free peer
+        indexes, with the Drivatars' names, sent to every console (`src` too: it sees them like other players)."""
+        self.bots_remove('a new event')
+        want = drivatars.wanted(os.path.dirname(os.path.abspath(__file__)))
+        if not want:
+            return
+        if src.player_id is None or src.console_id is None or src.car_id is None or not src.user:
+            print(f'{time.strftime("%H:%M:%S")} drivatars: {self.who(src)} has no player, console or car yet; none added', flush=True)
+            return
+        entries = [(m, o) for owner, m, o in self.history if owner == src.index and o['router'] in (1, 2, 3)]
+        n = min(want, len(self.free))
+        taken = set(self.names.values())
+        pool = [x for x in self.drivatar_names if x not in taken]
+        random.shuffle(pool)
+        for k in range(n):
+            idx = self.free.pop(0)
+            bot = Peer(('bot', idx), idx, next(self.joins))
+            bot.is_bot, bot.user, bot.ready = True, drivatars.BOT_XUID_BASE + idx, True
+            bot.player_id, bot.console_id, bot.car_id = src.player_id, src.console_id, src.car_id
+            bot.offset = drivatars.offset(k)
+            name = pool[k] if k < len(pool) else f'Drivatar {k + 1}'
+            self.names[str(bot.user)] = name
+            for m, o in entries:
+                payload = drivatars.replace_xuid(o['payload'], src.user, bot.user)
+                if m == 7 and o['router'] == nerd.PLAYER_ROUTER:
+                    payload = drivatars.rename_player(payload, name, bot.user) or payload
+                o2 = dict(o, payload=payload)
+                self.history.append((idx, m, o2))
+                bot.objects[(o['router'], o['id'])] = o['seq']
+                bot.kept += 1
+            self.bots.append(bot)
+        self.bot_source = src
+        for p in self.peers.values():
+            if p.synced:
+                self.send_all(p, [self.relayed(p, owner, m, o['router'], o['id'], o['payload'], o.get('type', 0), o['seq'])
+                                  for owner, m, o in self.history if owner in {b.index for b in self.bots}])
+        for bot in self.bots:                # in the session (as the server says of a console that has entered it)
+            self.set_console_var(bot, nerd.CONSOLE_SESSION_ENTRY_FINALISED, True)
+            self.set_console_var(bot, nerd.CONSOLE_READY, True)
+        print(f'{time.strftime("%H:%M:%S")} drivatars: {len(self.bots)} added for event {self.event_no} '
+              f'(copies of {self.who(src)}, {len(entries)} objects each): {", ".join(self.who(b) for b in self.bots)}', flush=True)
+
+    def bot_console_var(self, bot, var, value):
+        """One of a Drivatar's own ConsoleSynced vars (what a console says of itself: loaded, render ready), as an
+        update from it to every console; kept in the history for consoles that come later."""
+        bot.console_vars[var] = value
+        payload = nerd.bool_var(var, value)
+        o = dict(router=3, a=0, b=0, id=bot.console_id, seq=0, payload=payload)
+        self.history.append((bot.index, 8, o))
+        for p in self.peers.values():
+            if p.synced and (bot.index, 3, bot.console_id) in p.out_seq:
+                self.send_all(p, [self.relayed(p, bot.index, 8, 3, bot.console_id, payload)])
+
+    def bots_join(self):
+        """The Drivatars take part in the event: ready, participating, cars loaded, on the grid."""
+        for bot in self.bots:
+            bot.finished = False
+            self.set_console_var(bot, nerd.CONSOLE_READY, True)
+            self.set_console_var(bot, nerd.CONSOLE_PARTICIPATING_IN_RACE, True)
+            for var in (nerd.CONSOLE_HAS_LOADED_CARS, nerd.CONSOLE_HAS_GRID):
+                self.bot_console_var(bot, var, True)
+            self.participants.append(bot)
+
+    def bots_follow(self, body):
+        """The source's car moved: each Drivatar's car follows it at its place."""
+        for p in self.peers.values():
+            if p.synced:
+                self.send_all(p, [nerd.car_msg(b.car_id, drivatars.shifted(body, *b.offset), peer=b.index)
+                                  for b in self.bots], sequenced=False)
+
+    def bots_remove(self, why):
+        if not self.bots:
+            return
+        bots, self.bots, self.bot_source = self.bots, [], None
+        self.participants = [p for p in self.participants if not p.is_bot]
+        for bot in bots:
+            self.drop(bot, f'Drivatar removed: {why}')
 
     # ---- tag modes (King, Infection) ----------------------------------------------------------------------------
     # Ported from FH2MP (GPL-3.0, https://github.com/Charelene/FH2MP, native/internal/game/events.go). The server
@@ -1128,6 +1224,8 @@ class Relay:
                 peer.cars += 1
                 if not h['a'] and not h['b']:
                     peer.car_id = h['id']
+                    if self.bots and peer is self.bot_source:
+                        self.bots_follow(body)
                     pos = tuple(traffic.f32(body.val >> (32 * i)) for i in range(3))
                     if all(math.isfinite(x) and abs(x) < 1e6 for x in pos):
                         peer.pos = pos
@@ -1340,8 +1438,9 @@ class TrafficHost:
         print(f'{time.strftime("%H:%M:%S")} {text}', flush=True)
 
 
-def start(out_dir, lock, port=5101, host='127.0.0.1', mirror=None, leader_xuid=None, start_hour=10.0, traffic_models=()):
-    relay = Relay(out_dir, lock, port, host, mirror, leader_xuid, start_hour, traffic_models)
+def start(out_dir, lock, port=5101, host='127.0.0.1', mirror=None, leader_xuid=None, start_hour=10.0, traffic_models=(),
+          drivatar_names=()):
+    relay = Relay(out_dir, lock, port, host, mirror, leader_xuid, start_hour, traffic_models, drivatar_names)
     threading.Thread(target=relay.traffic_loop, daemon=True).start()
     threading.Thread(target=relay.run, daemon=True).start()
     if mirror is not None:
