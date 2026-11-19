@@ -450,6 +450,7 @@ class PeerState:
         self.rx, self.window_at, self.window_n, self.flooded = 0, 0.0, 0, False
         self.join_until, self.report_at = None, None
         self.early = {}                      # model -> loaded, reported before the join
+        self.seen_seq, self.seen_order = set(), []   # its last message numbers (repeats are dropped)
 
 
 class World:
@@ -506,10 +507,20 @@ class World:
 
     # the manager's Out
     def add(self, p, car):
+        """AddTraffic and the car's latest state in one sequenced packet, in that order (as FH2MP sends them: one
+        flush). Sent apart, the state could arrive first over the internet; the console dropped it for a car it
+        didn't know yet, and the car stayed invisible while the console counted it as held (seen 2026-11-19: a
+        player who joined again next to the host's cars saw no traffic at all)."""
         d = car.info
+        own = self.batch is None
+        if own:
+            self.batch = []
         self.push(p, C_ADD_TRAFFIC, a=d.struct[0], s14=d.struct[1], u5=d.struct[2], b=d.struct[3], flag=d.struct[4])
         for m, f in d.latest():
             self.emit(p, self.update_message(m, f))
+        if own:
+            batch, self.batch = self.batch, None
+            self.host.send(p, batch, True)
 
     def remove(self, p, vid):
         if p in self.state:
@@ -583,6 +594,14 @@ class World:
     def on_message(self, p, kind, a, s14, u5, b, flag, seq):
         """A ServerTrafficMessage (71) from a console."""
         s = self.st(p)
+        # A console sends its messages again until their packet is acked, in new packets: each one counts once
+        # (its own u32 sequence number).
+        if seq in s.seen_seq:
+            return
+        s.seen_seq.add(seq)
+        s.seen_order.append(seq)
+        if len(s.seen_order) > 512:
+            s.seen_seq.discard(s.seen_order.pop(0))
         s.rx += 1
         if s.rx <= 40 or s.rx % 200 == 0:
             held = len(self.manager.players[p].held) if p in self.manager.players else 0
