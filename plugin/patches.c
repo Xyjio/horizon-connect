@@ -76,6 +76,13 @@ static int g_trafficOwnership = 1;
 // session's clock is used.
 static int g_onlineClock = 1;
 
+// [test] RemoteAI=1 (test only, off by default): the race's "remote car prediction on" (stateflow
+// network.enable_remote_car_prediction, behavior SetRemotePrediction, 140922350) sets every network car (type 3)
+// to follow the network (14029CB20) or not (1402A72F0) by its parameter; the je at 1409224B7 (74 13) becomes jmp
+// (EB 13), so this console never lets network cars follow the network in a race. Asks whether its own AI then
+// drives them (Drivatars in online races, step 3).
+static int g_testRemoteAI;
+
 // [online] ShowLeaderHint=0 (default): the session leader's hint "You are the president - start events everyone can
 // join" is shown by NetworkFreeRoamLeaderInstructionComponent and, with no server telling it to go, stays on screen
 // for the whole session. It is shown in two places: its update (140810920, made to return at once: ret instead of
@@ -178,6 +185,10 @@ static void game_patches(void) {
   if (g_onlineClock) {
     static const BYTE orig[] = { 0x75, 0x3F }, nops[] = { 0x90, 0x90 };   // jne 14092F0F1 (short)
     patch_bytes(GAME_BASE + (0x14092F0B0 - 0x140000000ULL), orig, nops, 2, "OnlineClock", 1);
+  }
+  if (g_testRemoteAI) {
+    static const BYTE orig[] = { 0x74, 0x13 }, jmp[] = { 0xEB, 0x13 };
+    patch_bytes(GAME_BASE + (0x1409224B7 - 0x140000000ULL), orig, jmp, 2, "TEST RemoteAI", 1);
   }
   if (g_skipTrafficWait) {
     static const BYTE orig[] = { 0x75, 0x0D }, nops[] = { 0x90, 0x90 };

@@ -902,6 +902,7 @@ static void start(const wchar_t *path) {
   g_showLeaderHint = GetPrivateProfileIntW(L"online", L"ShowLeaderHint", 0, g_ini);
   g_trafficOwnership = GetPrivateProfileIntW(L"net", L"TrafficOwnership", 1, g_ini);
   g_onlineClock = GetPrivateProfileIntW(L"net", L"OnlineClock", 1, g_ini);
+  g_testRemoteAI = GetPrivateProfileIntW(L"test", L"RemoteAI", 0, g_ini);
   g_guards = GetPrivateProfileIntW(L"guards", L"Enabled", 1, g_ini);
   g_guardTestForce = GetPrivateProfileIntW(L"guards", L"TestForce", 0, g_ini);
   g_guardTestCar = GetPrivateProfileIntW(L"guards", L"TestRejectCar", 0, g_ini);
