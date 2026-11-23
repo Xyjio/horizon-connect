@@ -134,6 +134,7 @@ class Peer:
         self.bad = 0                         # packets that couldn't be read
         self.kept = 0                        # its entries in the relay's history
         self.is_bot = False                  # a Drivatar: a player without a console (drivatars.py)
+        self.hidden_at = None                # its car is hidden from the others since (after its finish; monotonic)
         self.offset = (0.0, 0.0)             # a Drivatar's place next to the car it follows (x, z metres)
 
 
@@ -489,6 +490,8 @@ class Relay:
         others = [p for p in self.peers.values() if p is not peer and p.synced]
         for p in others:
             self.join_prompt(p)
+        for p in self.peers.values():
+            self.unhide(p, 'a new event')
         self.bots_add(peer)
         return note + f'; join prompt to {[p.index for p in others]}'
 
@@ -528,6 +531,20 @@ class Relay:
             print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: {self.who(peer)} left', flush=True)
         return note
 
+    # A car whose player has finished an online race is passed on in another universe (FH2MP's phasing of a car
+    # across an event boundary: world.go, GPL-3.0, https://github.com/Charelene/FH2MP), so the others' consoles
+    # don't draw it: after the finish the cars roll out to the same place, and the results and rewards scenes
+    # showed the players' cars inside each other (2026-11-23). Its Drivatars follow it there. Shown again when
+    # its console clears RenderReady (quit_race, after the rewards: back in free roam), at the next event, or
+    # after HIDE_MAX_S.
+    HIDDEN_UNIVERSE = 17                     # OnlinePrivate16, one of the private universes FH2MP phases to
+    HIDE_MAX_S = 300
+
+    def unhide(self, peer, why):
+        if peer.hidden_at is not None:
+            peer.hidden_at = None
+            print(f'{time.strftime("%H:%M:%S")} {self.who(peer)}: car shown to the others again ({why})', flush=True)
+
     def on_final_score(self, peer):
         """A racer crossed the line (its MsgScoreKeyframe). The race ends when all have, or a while after the
         first one: then InRace goes off, which lets the results screen go on (NetworkWaitForRaceEnd 1408EEB20
@@ -538,6 +555,8 @@ class Relay:
         if self.tag and now - self.event_start < self.TAG_KEYFRAME_MIN_MS:
             return '(tag mode: a score while playing, not the end)'
         peer.finished = True
+        if not self.tag:
+            peer.hidden_at = time.monotonic()
         print(f'{time.strftime("%H:%M:%S")} event {self.event_no}: {self.who(peer)} finished after '
               f'{(now - self.event_start) / 1000:.1f} s', flush=True)
         if all(p.finished for p in self.participants if not p.is_bot):
@@ -1202,6 +1221,9 @@ class Relay:
                     changed = nerd.read_console_vars(o['payload'])
                     if self.event_state and peer in self.participants:
                         self.note_load_step(peer, changed)
+                    if (peer.hidden_at is not None and changed.get(nerd.CONSOLE_RENDER_READY, 1) == 0
+                            and not (self.event_state and peer in self.participants)):
+                        self.unhide(peer, 'back in free roam')
                     peer.console_vars.update(changed)
                 if msg == 7 and o['router'] == nerd.PLAYER_ROUTER:
                     peer.player_id, peer.own_leader, new_player = o['id'], None, True
@@ -1218,6 +1240,11 @@ class Relay:
                     mirror_objs.append((m, ro))
             elif msg == 15:
                 h, body = nerd.read_car(r)
+                if not h['a'] and not h['b'] and peer.hidden_at is not None:
+                    if time.monotonic() - peer.hidden_at > self.HIDE_MAX_S:
+                        self.unhide(peer, f'{self.HIDE_MAX_S} s after the finish')
+                    else:
+                        body = nerd.car_in_universe(body, self.HIDDEN_UNIVERSE)
                 unseq.append(('car', h, body))
                 if self.mirror is not None:
                     self.delayed.append((time.monotonic() + self.mirror, peer, nerd.car_msg(h['id'], body, peer=MIRROR_INDEX)))

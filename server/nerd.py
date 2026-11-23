@@ -207,6 +207,18 @@ def read_car(r):
     return h, BitWriter().bits(r.bits(CAR_BODY_BITS), CAR_BODY_BITS)
 
 
+CAR_UNIVERSE_OFFSET = 395                  # the car's universe in a CarPredictionFull body, 5 bits (FH2MP netv2.go)
+
+
+def car_in_universe(body, universe):
+    """A copy of a CarPredictionFull body (BitWriter) with its universe set."""
+    out = BitWriter()
+    mask = 31 << CAR_UNIVERSE_OFFSET
+    out.val = (body.val & ~mask) | ((universe & 31) << CAR_UNIVERSE_OFFSET)
+    out.pos = body.pos
+    return out
+
+
 def car_msg(id, body, peer=None):
     return concat(write_handle(BitWriter().bits(15, 7), 7, id, peer), body)
 
