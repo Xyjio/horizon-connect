@@ -67,6 +67,15 @@ static int g_skipTrafficWait;
 // (je = 74 7D) becomes two nops, so every hit asks (the game's own 2 s between requests stays).
 static int g_trafficOwnership = 1;
 
+// [net] OnlineClock=1 (default): the time of day. SetTimeOfDay "realtime" (the behavior at 14092F040,
+// run when free roam starts again, e.g. after an online race) takes the session's clock (StartNetworkSync
+// 14197AF90) only if the lobby has a SessionHost (CLobby+0xD0) and CLobby+0xA8 is 0 - else the PC's clock
+// (14197AF00). +0xA8 is the reason the console last left a session (set by 140A2E2A0, e.g. 5 when the player
+// leaves), so after leaving and joining again the next race ended on the PC's time (seen 2026-11-23: day for one
+// player, night for the other). The jne at 14092F0B0 (0F 85 3B 00 00 00) becomes six nops: with a SessionHost the
+// session's clock is used.
+static int g_onlineClock = 1;
+
 // [online] ShowLeaderHint=0 (default): the session leader's hint "You are the president - start events everyone can
 // join" is shown by NetworkFreeRoamLeaderInstructionComponent and, with no server telling it to go, stays on screen
 // for the whole session. It is shown in two places: its update (140810920, made to return at once: ret instead of
@@ -165,6 +174,10 @@ static void game_patches(void) {
   if (g_trafficOwnership) {
     static const BYTE orig[] = { 0x80, 0xB9, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x74, 0x7D }, repl[] = { 0x80, 0xB9, 0xAA, 0x00, 0x00, 0x00, 0x00, 0x90, 0x90 };
     patch_bytes(GAME_BASE + (0x14071743E - 0x140000000ULL), orig, repl, 9, "TrafficOwnership", 1);
+  }
+  if (g_onlineClock) {
+    static const BYTE orig[] = { 0x0F, 0x85, 0x3B, 0x00, 0x00, 0x00 }, nops[] = { 0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00 };
+    patch_bytes(GAME_BASE + (0x14092F0B0 - 0x140000000ULL), orig, nops, 6, "OnlineClock", 1);
   }
   if (g_skipTrafficWait) {
     static const BYTE orig[] = { 0x75, 0x0D }, nops[] = { 0x90, 0x90 };
