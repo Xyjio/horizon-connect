@@ -57,7 +57,8 @@ static void xuid_patch(void) {
 // NetworkWaitForAllPendingTraffic (update 1408E05E0) while the traffic manager's pending flag (+0xAE) is set -
 // traffic Turn 10's server ran and fh2srv doesn't - and only after it are the players' cars unghosted
 // (NetworkInitialCarLoadingUnghosted), so without this players drive through each other. The patch drops the
-// jne at 1408E0658, so the wait is done at once (online traffic stays empty).
+// jne at 1408E0658, so the wait is done at once. Since 1.3.0 the relay runs the traffic (InitialJoinComplete ends the
+// wait itself); the patch stays as a safety net.
 static int g_skipTrafficWait;
 
 // [net] TrafficOwnership=1 (default; patch from FH2MP, GPL-3.0, https://github.com/Charelene/FH2MP, shim/src/fh2mp_mod.c

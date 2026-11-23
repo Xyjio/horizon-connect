@@ -30,8 +30,11 @@ through the host's playit.gg tunnel.
 - `streams.c` – a working Windows.Storage.Streams DataWriter (Azimuth's loses the bodies of the replies).
 - `qos.c`, `assoc.c`, `party.c` – stand-ins for Windows.Xbox.Networking and Multiplayer.Party answers Azimuth
   gives offline (QoS measurements, secure device association, party registration).
-- `patches.c` – the player id (Azimuth's XboxUserId) and two waits the game would never finish without Turn 10's
-  traffic / weather service. It also keeps the session leader's hint ("You are the president ...") from being
+- `patches.c` – the player id (Azimuth's XboxUserId) and two waits at the free roam start (the weather object and the
+  traffic manager's pending flag; `[net] SkipWeatherWait` / `SkipTrafficWait`, kept as a safety net now that the
+  relay sends both). `[net] TrafficOwnership` (on, from FH2MP) lets a console ask for every traffic car it hits;
+  `[net] OnlineClock` (off) and `[test] RemoteAI` (off) are experiments (time of day; network cars not following
+  the network in races). It also keeps the session leader's hint ("You are the president ...") from being
   shown (`[online] ShowLeaderHint=0`): with no server to take it away it stayed all session, and showing it listed
   the new leader twice in the online player list. It turns the game's Game DVR clips off (the game's own
   `disableGameDVR` check is made to always skip): Azimuth can't activate `ApplicationClipCapture` and would stop

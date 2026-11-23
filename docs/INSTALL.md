@@ -67,7 +67,8 @@ Every time:
    only once.
 3. When you are done: **Stop the server** → A, or just close the game.
 
-Your game must keep running while you host.
+Your game must keep running while you host: your PC *is* the server. There is no central server - your friends
+connect straight to your PC through your playit.gg address, and the session ends when you close the game.
 
 ## 6. Race together
 
@@ -80,6 +81,10 @@ Your game must keep running while you host.
 A race ends a few seconds after the last player crossed the line, or 30 seconds after the first one. Players who
 leave the race or lose the connection drop out; the others race on. Only the host needs version 1.1.0 or newer for
 this.
+
+**Traffic** (1.3.0): free roam has traffic again, the same for everyone. The games share it out - each drives
+the traffic cars near it - and a car someone hits goes over to that player's game, so it reacts for everyone. The
+host needs 1.3.0; everyone should update. Races have their own traffic where the event has any.
 
 **King and Infected** (the Playground games) start the same way. The crown or the infection passes on when cars
 touch. King ends at the time limit the leader picked, Infected when everyone is infected. The host needs 1.2.0.

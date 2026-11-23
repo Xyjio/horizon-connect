@@ -26,6 +26,11 @@ Names: the gamertag in each console's PlayerData (NetworkName) is kept, and "FH2
 FH2N!{xuid: gamertag}. Every player's own local server asks this when the game wants another player's
 profile (fh2srv.py), since it only knows its own player's name.
 
+Also here: events and races (event_tick), King / Infected (tag_*), the session's weather and clock, the online
+traffic (traffic.py: the game's traffic manager, ported from FH2MP), a finished racer's car hidden from the others
+until it is back in free roam (another universe in its CarPredictionFull), and - off unless
+server/test-drivatars.txt exists - Drivatars as players without a console (drivatars.py, work in progress).
+
 Testing alone (fh2srv --mirror <seconds>): each console also gets its own objects back as another player's
 (peer 250), and its car that many seconds late - a ghost of itself to show that car sync works.
 

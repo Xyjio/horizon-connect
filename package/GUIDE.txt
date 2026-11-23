@@ -131,7 +131,9 @@ internet (like a LAN party). If the host leaves, the session ends.
   4. When you're done: "Stop the server" -> A, or just close the
      game.
 
-  Your game has to keep running while you host.
+  Your game has to keep running while you host: your PC is the
+  server. Your friends connect straight to it through your address;
+  the session ends when you close the game.
 
 
 ---------------------------------------------------------------------
@@ -152,6 +154,10 @@ internet (like a LAN party). If the host leaves, the session ends.
   the session to start an event. To let someone else start events:
   pause menu -> online player list -> the player -> "Make session
   leader".
+
+  Traffic: free roam has traffic again, the same for everyone; hit a
+  traffic car and it reacts for everyone. The host needs 1.3.0 -
+  everyone should update.
 
   King and Infected (the Playground games) start the same way. The
   crown or the infection passes on when cars touch. King ends at the

@@ -7,18 +7,17 @@ Found a bug or have a wish? Open an [issue](../../issues).
 **Legend:** 🚧 in progress · 📋 planned · 💡 idea (maybe) · ✅ done
 
 ## 🚧 In progress
-- **Other events** - not only races but also Infected, King and Co-op bucket list.
+- **Other events** - not only races but also Co-op bucket list (Infected and King are done since 1.2.0).
 ## 📋 Planned
 - **Storm Island** – join the online free roam on Storm Island, not only on the mainland.
-- **Traffic in online free roam** – the online free roam has no traffic cars yet (it came from Turn 10's
-  servers).
 - **Liveries** – see the other players' liveries
 - **Road trips** – the game's online road trips in a private session (voting, driving there together, the events).
 - **Drivatars in online races** – the single-player Drivatars as AI opponents in online races.
+- **Traffic colours** – the same colour for a traffic car on every player's screen.
+- **Time of day after rejoining** – the same time for everyone after a player leaves and joins again.
 
 ## 💡 Ideas
 
-- Road trips together (the game's online road trips, voting for the next event).
 - Player list for the host in the HORIZON CONNECT menu (who is connected).
 
 ## ✅ Done
