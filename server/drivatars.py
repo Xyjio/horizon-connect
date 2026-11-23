@@ -15,6 +15,8 @@ Testing only: server\\test-drivatars.txt holds how many Drivatars join each race
 
 import math
 import os
+import random
+import sqlite3
 import struct
 
 BOT_XUID_BASE = 0x9F00000000000          # player ids of Drivatars (FH2MP's bot range; consoles have 0x9000...)
@@ -166,3 +168,44 @@ def player_car(payload, car):
         payload = _set_bits(payload, f[PLAYER_USE_STOCK][0], 1, 1)
     return payload
 
+
+
+def load_cars(game_exe):
+    r"""{car id: class} of the base game's cars (Data_Car with ContentId 0, not the NUL_ placeholders) from the game's
+    database (Mount\media\stripped\gamedbRC.slt); {} without it. The single-player Drivatars have no car of their
+    own in DefaultCache.bin (0xFFFFFFFF: the game picks one per race), so a Drivatar gets one of these."""
+    mount = os.path.dirname(game_exe)
+    for sub in (('media', 'stripped'), ('mediapc', 'stripped'), ('media',), ('mediapc',)):
+        p = os.path.join(mount, *sub, 'gamedbRC.slt')
+        if os.path.isfile(p):
+            break
+    else:
+        return {}
+    try:
+        c = sqlite3.connect(p)
+        try:
+            return {int(i): int(k) for i, k, m in c.execute('SELECT Id, ClassID, MediaName FROM Data_Car WHERE ContentId = 0')
+                    if not str(m).upper().startswith('NUL_')}
+        finally:
+            c.close()
+    except sqlite3.Error:
+        return {}
+
+
+def player_model(payload):
+    """The car model in a PlayerData payload, or None."""
+    f = player_fields(payload)
+    if f and PLAYER_MODEL in f:
+        return (payload.val >> f[PLAYER_MODEL][0]) & 0xFFFFFFFF
+    return None
+
+
+def pick_cars(cars, model, n):
+    """n cars of the class of `model` (the leader's car), not `model` itself, different ones while there are;
+    the leader's own car when its class isn't known."""
+    cls = cars.get(model)
+    pool = [c for c, k in cars.items() if k == cls and c != model] if cls is not None else []
+    if not pool:
+        return [model] * n
+    random.shuffle(pool)
+    return [pool[i % len(pool)] for i in range(n)]

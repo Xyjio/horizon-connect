@@ -9,7 +9,7 @@ gets 503.
 import argparse, datetime, hashlib, http.server, json, os, random, struct, sys, threading, uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import relay, traffic, xls
+import drivatars, relay, traffic, xls
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--port', type=int, default=8090)
@@ -548,6 +548,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 relay.start(args.out, lock, args.game_port, host=args.game_host, mirror=args.mirror, leader_xuid=args.leader_xuid, start_hour=args.start_hour,
             traffic_models=[] if args.no_traffic else traffic.load_models(exe),
-            drivatar_names=[(d['GamerTag'], d.get('CarId') or 0) for d in DRIVATARS if d.get('GamerTag')])
+            drivatar_names=[d['GamerTag'] for d in DRIVATARS if d.get('GamerTag')],
+            drivatar_cars=drivatars.load_cars(exe))
 print(f'fh2srv listening on {args.host}:{args.port}, captures in {args.out}', flush=True)
 http.server.ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()

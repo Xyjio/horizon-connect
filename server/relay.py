@@ -140,7 +140,7 @@ class Peer:
 
 class Relay:
     def __init__(self, out_dir, lock, port=5101, host='127.0.0.1', mirror=None, leader_xuid=None, start_hour=10.0,
-                 traffic_models=(), drivatar_names=()):
+                 traffic_models=(), drivatar_names=(), drivatar_cars=None):
         self.out_dir, self.lock = out_dir, lock
         self.mirror = mirror                 # seconds: each console also gets itself back as a ghost player
         self.leader_xuid = leader_xuid       # the host's player id: its console takes the crown when it joins
@@ -190,7 +190,8 @@ class Relay:
         self.event_last_loaded_at = None     # when a participant last said it has loaded the cars
         self.names = {}                      # xuid (text) -> gamertag, from the consoles' PlayerData
         self.traffic = traffic.World(TrafficHost(self), traffic_models)
-        self.drivatar_names = list(drivatar_names)   # the single-player Drivatars: (gamertag, car id)
+        self.drivatar_names = list(drivatar_names)   # the single-player Drivatars' gamertags
+        self.drivatar_cars = dict(drivatar_cars or {})   # car id -> class: the cars they may drive
         self.bots = []                       # the Drivatars in the current event (Peer with is_bot)
         self.bot_source = None               # the console whose objects and car they copy (the leader)
         print(f'fh2srv game UDP (relay) on [{host}]:{port}' + (f', leader: player {leader_xuid} when present' if leader_xuid else ''), flush=True)
@@ -713,7 +714,12 @@ class Relay:
         entries = [(m, o) for owner, m, o in self.history if owner == src.index and o['router'] in (1, 2, 3)]
         n = min(want, len(self.free))
         taken = set(self.names.values())
-        pool = [x for x in self.drivatar_names if x[0] not in taken]
+        pool = [x for x in self.drivatar_names if x not in taken]
+        model = None                         # the leader's car: the Drivatars get cars of its class
+        for m, o in entries:
+            if o['router'] == nerd.PLAYER_ROUTER:
+                model = drivatars.player_model(o['payload']) or model
+        cars = drivatars.pick_cars(self.drivatar_cars, model, n) if model else [0] * n
         random.shuffle(pool)
         for k in range(n):
             idx = self.free.pop(0)
@@ -721,7 +727,7 @@ class Relay:
             bot.is_bot, bot.user, bot.ready = True, drivatars.BOT_XUID_BASE + idx, True
             bot.player_id, bot.console_id, bot.car_id = src.player_id, src.console_id, src.car_id
             bot.offset = drivatars.offset(k)
-            name, car = pool[k] if k < len(pool) else (f'Drivatar {k + 1}', 0)
+            name, car = pool[k] if k < len(pool) else f'Drivatar {k + 1}', cars[k]
             bot.car = car
             self.names[str(bot.user)] = name
             for m, o in entries:
@@ -1470,8 +1476,8 @@ class TrafficHost:
 
 
 def start(out_dir, lock, port=5101, host='127.0.0.1', mirror=None, leader_xuid=None, start_hour=10.0, traffic_models=(),
-          drivatar_names=()):
-    relay = Relay(out_dir, lock, port, host, mirror, leader_xuid, start_hour, traffic_models, drivatar_names)
+          drivatar_names=(), drivatar_cars=None):
+    relay = Relay(out_dir, lock, port, host, mirror, leader_xuid, start_hour, traffic_models, drivatar_names, drivatar_cars)
     threading.Thread(target=relay.traffic_loop, daemon=True).start()
     threading.Thread(target=relay.run, daemon=True).start()
     if mirror is not None:
