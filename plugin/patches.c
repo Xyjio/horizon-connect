@@ -72,7 +72,7 @@ static int g_trafficOwnership = 1;
 // 14197AF90) only if the lobby has a SessionHost (CLobby+0xD0) and CLobby+0xA8 is 0 - else the PC's clock
 // (14197AF00). +0xA8 is the reason the console last left a session (set by 140A2E2A0, e.g. 5 when the player
 // leaves), so after leaving and joining again the next race ended on the PC's time (seen 2026-11-23: day for one
-// player, night for the other). The jne at 14092F0B0 (0F 85 3B 00 00 00) becomes six nops: with a SessionHost the
+// player, night for the other). The jne at 14092F0B0 (75 3F) becomes two nops: with a SessionHost the
 // session's clock is used.
 static int g_onlineClock = 1;
 
@@ -176,8 +176,8 @@ static void game_patches(void) {
     patch_bytes(GAME_BASE + (0x14071743E - 0x140000000ULL), orig, repl, 9, "TrafficOwnership", 1);
   }
   if (g_onlineClock) {
-    static const BYTE orig[] = { 0x0F, 0x85, 0x3B, 0x00, 0x00, 0x00 }, nops[] = { 0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00 };
-    patch_bytes(GAME_BASE + (0x14092F0B0 - 0x140000000ULL), orig, nops, 6, "OnlineClock", 1);
+    static const BYTE orig[] = { 0x75, 0x3F }, nops[] = { 0x90, 0x90 };   // jne 14092F0F1 (short)
+    patch_bytes(GAME_BASE + (0x14092F0B0 - 0x140000000ULL), orig, nops, 2, "OnlineClock", 1);
   }
   if (g_skipTrafficWait) {
     static const BYTE orig[] = { 0x75, 0x0D }, nops[] = { 0x90, 0x90 };
