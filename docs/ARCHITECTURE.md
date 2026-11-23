@@ -2,7 +2,9 @@
 
 Forza Horizon 2's online play needed Xbox Live (sign-in, profiles, the multiplayer session directory, QoS,
 party) and Turn 10's game servers (web services, plus a dedicated NerdCore server that relayed every player's
-cars). Horizon Connect answers all of that on the players' own PCs.
+cars). Horizon Connect answers all of that on the players' own PCs. There is no central server: the host's PC
+runs the session's relay (Turn 10's NerdCore server) while the host plays, and the others connect to it directly
+through the host's playit.gg tunnel.
 
 ## The pieces
 
@@ -90,6 +92,22 @@ cars). Horizon Connect answers all of that on the players' own PCs.
   MsgTagCollision (36: both cars, their buckets before and after); the server takes it if it matches what it has
   and sends the new buckets. The event ends at the time limit, or for Infected when everyone is It. The owner of the
   lobby's GameOptions counts its updates anew after every grant.
+- Traffic (`traffic.py`, ported from FH2MP's traffic manager, GPL-3.0): at SessionEntryFinalised a console joins
+  the traffic (LoadCarModel for the 17 TrafficCars of the game's database `gamedbRC.slt`, AllModelIdsSent,
+  TrafficLimit 18, then InitialJoinComplete once its CarModelLoaded reports have settled). The consoles ask for
+  traffic (ServerTrafficMessage 71: RequestTraffic, TrafficSpawned, RequestDespawn, CanTakeOwnership,
+  RequestOwnership ...); the relay grants spawns, keeps every car's owner and its latest state (FullSync,
+  RouteProgress, FullRoute, Stationary: 16/17/73/74 in, 18/19/75/76 out), hands each car to the consoles near it
+  (AddTraffic with the state in one packet) and its ownership to the one nearest or the one that hit it
+  (ClientTrafficMessage 72: TakeOwnership / DropOwnership), rebalancing every 0.2 s. A console's messages count once
+  (it sends them again until acked). Event participants have traffic of their own (universe 1). The DLL's
+  `[net] TrafficOwnership` patch lets a console ask for every traffic car it hits.
+- After a racer's finish (its MsgScoreKeyframe) its car goes to the others in another universe (17, FH2MP's phasing
+  of a car across an event boundary), so they don't draw it on the results and rewards screens; shown again when
+  its console clears RenderReady (back in free roam), at the next event, or after 5 minutes.
+- `drivatars.py` – work in progress, off: with `server\test-drivatars.txt` (a number) the relay adds the
+  single-player Drivatars to a race as players without a console (copies of the leader's player objects, with
+  their names and a car of the leader's class). They only follow the leader's car so far.
 - `netsim.py` – testing only: with a `netsim.json` next to `relay.py` (`{"delay_ms": 70, "jitter_ms": 50,
   "loss": 0.05}`), packets to and from the tunnel's players are delayed and dropped like on a bad line.
 - fh2srv answers only the game's requests (`X-Horizon-Host` and a 127.0.0.1 / localhost Host).

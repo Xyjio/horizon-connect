@@ -13,6 +13,8 @@ Found a bug or have a wish? Open an [issue](../../issues).
 - **Traffic in online free roam** – the online free roam has no traffic cars yet (it came from Turn 10's
   servers).
 - **Liveries** – see the other players' liveries
+- **Road trips** – the game's online road trips in a private session (voting, driving there together, the events).
+- **Drivatars in online races** – the single-player Drivatars as AI opponents in online races.
 
 ## 💡 Ideas
 
@@ -20,6 +22,10 @@ Found a bug or have a wish? Open an [issue](../../issues).
 - Player list for the host in the HORIZON CONNECT menu (who is connected).
 
 ## ✅ Done
+
+### 1.3.0
+- **Traffic in online free roam**, the same for everyone (hit a car and it reacts for everyone).
+- The other players' cars no longer stand inside yours on the results and rewards screens.
 
 ### 1.2.3
 - Fix for a player missing from the race positions of those who joined a long-running session.

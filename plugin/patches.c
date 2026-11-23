@@ -67,14 +67,14 @@ static int g_skipTrafficWait;
 // (je = 74 7D) becomes two nops, so every hit asks (the game's own 2 s between requests stays).
 static int g_trafficOwnership = 1;
 
-// [net] OnlineClock=1 (default): the time of day. SetTimeOfDay "realtime" (the behavior at 14092F040,
+// [net] OnlineClock=1 (off by default: in the game on 2026-11-23 the times still differed after a rejoin): the time of day. SetTimeOfDay "realtime" (the behavior at 14092F040,
 // run when free roam starts again, e.g. after an online race) takes the session's clock (StartNetworkSync
 // 14197AF90) only if the lobby has a SessionHost (CLobby+0xD0) and CLobby+0xA8 is 0 - else the PC's clock
 // (14197AF00). +0xA8 is the reason the console last left a session (set by 140A2E2A0, e.g. 5 when the player
 // leaves), so after leaving and joining again the next race ended on the PC's time (seen 2026-11-23: day for one
 // player, night for the other). The jne at 14092F0B0 (75 3F) becomes two nops: with a SessionHost the
 // session's clock is used.
-static int g_onlineClock = 1;
+static int g_onlineClock;
 
 // [test] RemoteAI=1 (test only, off by default): the race's "remote car prediction on" (stateflow
 // network.enable_remote_car_prediction, behavior SetRemotePrediction, 140922350) sets every network car (type 3)

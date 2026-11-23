@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.0
+
+- **Traffic in online free roam**, the same for everyone (ported from FH2MP's traffic manager, GPL-3.0). The host's
+  server shares the traffic out between the players' games, as Turn 10's server did: each game drives the traffic
+  cars near it and the others see them at the same places. A traffic car someone hits goes over to that player's
+  game, so it reacts for everyone instead of snapping back. Events have their own traffic.
+  - A car handed to a player arrives in one packet with its state (sent apart, it could stay invisible over the
+    internet); messages a game sends again until they are acked count once.
+- After the finish of an online race, the other players' cars are hidden from you until they are back in free
+  roam: they rolled out to the same place and stood inside your car on the results and rewards screens.
+- The host needs 1.3.0 for both; every player should update so that hitting a traffic car works for them too.
+- Known: traffic cars can have a different colour for each player; after a player leaves and joins again, the
+  time of day can differ.
+
 ## 1.2.3
 
 - Fix: a player could be missing from the race positions (top right) of the others, while racing normally and

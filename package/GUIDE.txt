@@ -1,5 +1,5 @@
 =====================================================================
-  HORIZON CONNECT 1.2.3  -  Forza Horizon 2 online with your friends
+  HORIZON CONNECT 1.3.0  -  Forza Horizon 2 online with your friends
 =====================================================================
 
 Horizon Connect lets you drive together in Forza Horizon 2's online
@@ -7,6 +7,10 @@ free roam - without the Microsoft servers that were shut down. One of
 you hosts a server, the others join. Everything needed (the server
 and the internet tunnel through playit.gg) is inside the mod; you
 don't have to install anything else.
+
+There is no central server: the host's own PC runs the session while
+the host plays, and the friends join that PC directly over the
+internet (like a LAN party). If the host leaves, the session ends.
 
 
 ---------------------------------------------------------------------
@@ -219,7 +223,9 @@ don't have to install anything else.
     online in the paint shop.
   - Joining from the list starts free roam on the mainland (not on
     Storm Island).
-  - No traffic in online free roam, no road trips yet.
+  - Traffic cars can have another colour for each player.
+  - After leaving and joining again, the time of day can differ.
+  - No road trips and no AI drivers (Drivatars) in online races yet.
 
   What's being worked on: ROADMAP.md on GitHub.
 

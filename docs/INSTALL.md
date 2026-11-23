@@ -9,7 +9,7 @@
 ## 2. Install
 
 1. Back up your save first: copy `<Azimuth folder>\data\titles\1A96545B\saves` somewhere.
-2. Unpack `Horizon-Connect-1.2.3.zip`.
+2. Unpack `Horizon-Connect-1.3.0.zip`.
 3. Copy the folder `Horizon Connect` into `<Azimuth folder>\mods\`.
    `mods\Horizon Connect\mod.json` and `mods\Horizon Connect\plugins\` must be directly inside it.
 4. Check your player name – the name next to the round profile icon at the top right of Azimuth's start window.
@@ -87,6 +87,9 @@ touch. King ends at the time limit the leader picked, Infected when everyone is 
 ## 7. Troubleshooting
 
 - **"can't be reached"** – the host hasn't started the server, or you have different Horizon Connect versions.
+- **No traffic, or traffic cars snap back when you hit them** – the host needs 1.3.0 for traffic; update too, so
+  that hitting a traffic car works for you.
+- **Traffic cars have another colour than on your friend's screen** – known in 1.3.0; each game picks the colour.
   When a new version is out, the server list shows it at the top: A installs it, A again restarts the game.
 - **"Agent deleted" when hosting** – your playit agent was deleted on playit.gg: **Set up a new one** → A. You get a
   new address; send it to your friends. (A free playit account has room for one agent.)

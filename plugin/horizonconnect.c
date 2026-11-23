@@ -663,8 +663,8 @@ static DWORD WINAPI worker(LPVOID p) {
 //    azimuth-tls.dll to stand in for any more (it loads azimuth-tls-1.dll, -2.dll as TLS slot modules), so
 //    Extra Options loads this DLL with its other plugins, on its loader thread, at the game's first file lookup.
 //    Then DllMain does nothing and FH2PluginInitialize starts it.
-#define HC_VERSION "1.2.3"
-#define HC_VERSION_W L"1.2.3"
+#define HC_VERSION "1.3.0"
+#define HC_VERSION_W L"1.3.0"
 static int g_pluginMode;
 
 // Azimuth's folder (where azimuth.exe is), with a trailing backslash.
@@ -901,7 +901,7 @@ static void start(const wchar_t *path) {
   g_skipTrafficWait = GetPrivateProfileIntW(L"net", L"SkipTrafficWait", 0, g_ini);
   g_showLeaderHint = GetPrivateProfileIntW(L"online", L"ShowLeaderHint", 0, g_ini);
   g_trafficOwnership = GetPrivateProfileIntW(L"net", L"TrafficOwnership", 1, g_ini);
-  g_onlineClock = GetPrivateProfileIntW(L"net", L"OnlineClock", 1, g_ini);
+  g_onlineClock = GetPrivateProfileIntW(L"net", L"OnlineClock", 0, g_ini);
   g_testRemoteAI = GetPrivateProfileIntW(L"test", L"RemoteAI", 0, g_ini);
   g_guards = GetPrivateProfileIntW(L"guards", L"Enabled", 1, g_ini);
   g_guardTestForce = GetPrivateProfileIntW(L"guards", L"TestForce", 0, g_ini);
