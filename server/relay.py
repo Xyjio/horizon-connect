@@ -190,7 +190,7 @@ class Relay:
         self.event_last_loaded_at = None     # when a participant last said it has loaded the cars
         self.names = {}                      # xuid (text) -> gamertag, from the consoles' PlayerData
         self.traffic = traffic.World(TrafficHost(self), traffic_models)
-        self.drivatar_names = list(drivatar_names)   # the single-player Drivatars' gamertags
+        self.drivatar_names = list(drivatar_names)   # the single-player Drivatars: (gamertag, car id)
         self.bots = []                       # the Drivatars in the current event (Peer with is_bot)
         self.bot_source = None               # the console whose objects and car they copy (the leader)
         print(f'fh2srv game UDP (relay) on [{host}]:{port}' + (f', leader: player {leader_xuid} when present' if leader_xuid else ''), flush=True)
@@ -713,7 +713,7 @@ class Relay:
         entries = [(m, o) for owner, m, o in self.history if owner == src.index and o['router'] in (1, 2, 3)]
         n = min(want, len(self.free))
         taken = set(self.names.values())
-        pool = [x for x in self.drivatar_names if x not in taken]
+        pool = [x for x in self.drivatar_names if x[0] not in taken]
         random.shuffle(pool)
         for k in range(n):
             idx = self.free.pop(0)
@@ -721,12 +721,15 @@ class Relay:
             bot.is_bot, bot.user, bot.ready = True, drivatars.BOT_XUID_BASE + idx, True
             bot.player_id, bot.console_id, bot.car_id = src.player_id, src.console_id, src.car_id
             bot.offset = drivatars.offset(k)
-            name = pool[k] if k < len(pool) else f'Drivatar {k + 1}'
+            name, car = pool[k] if k < len(pool) else (f'Drivatar {k + 1}', 0)
+            bot.car = car
             self.names[str(bot.user)] = name
             for m, o in entries:
                 payload = drivatars.replace_xuid(o['payload'], src.user, bot.user)
                 if m == 7 and o['router'] == nerd.PLAYER_ROUTER:
                     payload = drivatars.rename_player(payload, name, bot.user) or payload
+                if car and o['router'] == nerd.PLAYER_ROUTER:
+                    payload = drivatars.player_car(payload, car)
                 o2 = dict(o, payload=payload)
                 self.history.append((idx, m, o2))
                 bot.objects[(o['router'], o['id'])] = o['seq']
@@ -741,7 +744,8 @@ class Relay:
             self.set_console_var(bot, nerd.CONSOLE_SESSION_ENTRY_FINALISED, True)
             self.set_console_var(bot, nerd.CONSOLE_READY, True)
         print(f'{time.strftime("%H:%M:%S")} drivatars: {len(self.bots)} added for event {self.event_no} '
-              f'(copies of {self.who(src)}, {len(entries)} objects each): {", ".join(self.who(b) for b in self.bots)}', flush=True)
+              f'(copies of {self.who(src)}, {len(entries)} objects each): '
+              f'{", ".join(f"{self.who(b)} (car {b.car})" for b in self.bots)}', flush=True)
 
     def bot_console_var(self, bot, var, value):
         """One of a Drivatar's own ConsoleSynced vars (what a console says of itself: loaded, render ready), as an

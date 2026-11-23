@@ -548,6 +548,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 relay.start(args.out, lock, args.game_port, host=args.game_host, mirror=args.mirror, leader_xuid=args.leader_xuid, start_hour=args.start_hour,
             traffic_models=[] if args.no_traffic else traffic.load_models(exe),
-            drivatar_names=[d['GamerTag'] for d in DRIVATARS if d.get('GamerTag')])
+            drivatar_names=[(d['GamerTag'], d.get('CarId') or 0) for d in DRIVATARS if d.get('GamerTag')])
 print(f'fh2srv listening on {args.host}:{args.port}, captures in {args.out}', flush=True)
 http.server.ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()

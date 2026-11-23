@@ -102,3 +102,67 @@ def rename_player(payload, name, xuid, index_bits=8):
     w.bits(nerd.PLAYER_XUID, index_bits).bits(xuid, 64)
     w.bits(rest, rest_bits)
     return w
+
+
+# PlayerData (LobbyPlayer) vars: [8-bit id][value] pairs in ascending order; the widths (negative: a string of up to
+# that many UTF-16 chars after a length prefix). From FH2MP (GPL-3.0, native/internal/playersetup/playersetup.go).
+PLAYER_WIDTHS = [
+    64, 1, 1, -16, 64, 1, 32, 1, 32, 32, 32, 32, 1, 1, 1, 1, 1, 1,
+    1, 4, 3, 16, 16, 32, 32, 32, 32, 32, 32, 1, 7, 8, 1, 1, 1, 1,
+    1, 32, 2, -4, 5, 64, 1, 1, 64, 1, 1, 64, 1, 1, 64, 1, 1, 64,
+    1, 1, 64, 1, 1, 64, 1, 1, 64, 1, 1, 64, 1, 1, 64, 1, 1, 64,
+    1, 1, 64, 1, 1, 3, 17, 16, 16, 32, 32, 32, 32, 32, 32, 32, 32, 1,
+    1, 3, 32, 64, 64, 2, 2, 2, 1, 1, 2, 1, 3, 32, 32, 32, 32, 1376,
+    32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 288, 32, 32, 32, 32,
+    32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32,
+    1, 32, 32, 32, 32, 1, 1, 1, 1, 1, 2, 2, 2, 2, 32, 32, 32, 32,
+]
+PLAYER_MODEL, PLAYER_USE_STOCK = 103, 144     # the car the others draw (FH2MP: from the model, not the part list)
+# (The car object, router 2, is 37 bits: a 5-bit var id 0 and 32 bits that were a float (80.0) in every capture of
+# 2026-11-23, not the model id FH2MP's carModelID reads there; it is left as it is.)
+
+
+def player_fields(payload):
+    """{var: (offset, width)} of a PlayerData payload; None when it doesn't parse."""
+    val, n, pos, prev, out = payload.val, payload.pos, 0, -1, {}
+    while pos < n:
+        if n - pos < 8:
+            return None
+        vid = (val >> pos) & 0xFF
+        pos += 8
+        if vid <= prev or vid >= len(PLAYER_WIDTHS):
+            return None
+        w = PLAYER_WIDTHS[vid]
+        if w < 0:
+            prefix = (-w).bit_length()
+            count = (val >> pos) & ((1 << prefix) - 1)
+            if count > -w:
+                return None
+            w = prefix + 16 * count
+        if pos + w > n:
+            return None
+        out[vid] = (pos, w)
+        prev, pos = vid, pos + w
+    return out
+
+
+def _set_bits(payload, offset, width, value):
+    import nerd
+    out = nerd.BitWriter()
+    mask = ((1 << width) - 1) << offset
+    out.val = (payload.val & ~mask) | ((value & ((1 << width) - 1)) << offset)
+    out.pos = payload.pos
+    return out
+
+
+def player_car(payload, car):
+    """A PlayerData payload with the car model set to `car` and stock parts asked for, where it has those vars."""
+    f = player_fields(payload)
+    if not f:
+        return payload
+    if PLAYER_MODEL in f:
+        payload = _set_bits(payload, f[PLAYER_MODEL][0], 32, car)
+    if PLAYER_USE_STOCK in f:
+        payload = _set_bits(payload, f[PLAYER_USE_STOCK][0], 1, 1)
+    return payload
+
