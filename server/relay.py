@@ -715,11 +715,13 @@ class Relay:
         n = min(want, len(self.free))
         taken = set(self.names.values())
         pool = [x for x in self.drivatar_names if x not in taken]
-        model = None                         # the leader's car: the Drivatars get cars of its class
+        model = cls = None                   # the leader's car and its class: the Drivatars get cars of that class
         for m, o in entries:
             if o['router'] == nerd.PLAYER_ROUTER:
                 model = drivatars.player_model(o['payload']) or model
-        cars = drivatars.pick_cars(self.drivatar_cars, model, n) if model else [0] * n
+                c = drivatars.player_class(o['payload'])
+                cls = c if c is not None else cls
+        cars = drivatars.pick_cars(self.drivatar_cars, model, n, cls) if model else [0] * n
         random.shuffle(pool)
         for k in range(n):
             idx = self.free.pop(0)
@@ -750,7 +752,7 @@ class Relay:
             self.set_console_var(bot, nerd.CONSOLE_SESSION_ENTRY_FINALISED, True)
             self.set_console_var(bot, nerd.CONSOLE_READY, True)
         print(f'{time.strftime("%H:%M:%S")} drivatars: {len(self.bots)} added for event {self.event_no} '
-              f'(copies of {self.who(src)}, {len(entries)} objects each): '
+              f'(copies of {self.who(src)}, {len(entries)} objects each; its car {model}, class {cls}): '
               f'{", ".join(f"{self.who(b)} (car {b.car})" for b in self.bots)}', flush=True)
 
     def bot_console_var(self, bot, var, value):

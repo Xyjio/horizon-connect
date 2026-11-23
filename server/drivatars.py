@@ -120,6 +120,7 @@ PLAYER_WIDTHS = [
     1, 32, 32, 32, 32, 1, 1, 1, 1, 1, 2, 2, 2, 2, 32, 32, 32, 32,
 ]
 PLAYER_MODEL, PLAYER_USE_STOCK = 103, 144     # the car the others draw (FH2MP: from the model, not the part list)
+PLAYER_CAR_CLASS = 81                           # the car's class, 0 D .. 5 S2 (seen: Veyron 5, 360 Challenge 4)
 # (The car object, router 2, is 37 bits: a 5-bit var id 0 and 32 bits that were a float (80.0) in every capture of
 # 2026-11-23, not the model id FH2MP's carModelID reads there; it is left as it is.)
 
@@ -200,10 +201,21 @@ def player_model(payload):
     return None
 
 
-def pick_cars(cars, model, n):
-    """n cars of the class of `model` (the leader's car), not `model` itself, different ones while there are;
-    the leader's own car when its class isn't known."""
-    cls = cars.get(model)
+def player_class(payload):
+    """The car class in a PlayerData payload (var 81), or None."""
+    f = player_fields(payload)
+    if f and PLAYER_CAR_CLASS in f:
+        off, w = f[PLAYER_CAR_CLASS]
+        return (payload.val >> off) & ((1 << w) - 1)
+    return None
+
+
+def pick_cars(cars, model, n, cls=None):
+    """n cars of class `cls` (the leader's car's; else the class of `model` in the table), not `model` itself,
+    different ones while there are; the leader's own car when no class is known. A car pack's car isn't in the
+    table, so the class comes from the leader's PlayerData."""
+    if cls is None:
+        cls = cars.get(model)
     pool = [c for c, k in cars.items() if k == cls and c != model] if cls is not None else []
     if not pool:
         return [model] * n
