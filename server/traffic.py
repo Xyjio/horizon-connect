@@ -54,10 +54,7 @@ ROUND_BUDGET, CHANGE_COST, DEFAULT_RADIUS = 10, 5, 250
 OWNER_BONUS, CHANGE_GAP_MS = 20, 2000.0
 TRAFFIC_LIMIT = HARD_CAP
 # the world's timers
-# NO_REPORT_S: FH2MP waits 2 s for a joining console's CarModelLoaded reports; over a slow link (simulated 70 ms +
-# 50 ms, 5 % loss, 2026-11-23) they came 2.05 s after a rejoin, InitialJoinComplete had gone out with no models
-# known and the player got only some of the cars around. 5 s.
-GRANT_TIMEOUT_S, REPORT_SETTLE_S, NO_REPORT_S, JOIN_WAIT_S = 15.0, 0.5, 5.0, 15.0
+GRANT_TIMEOUT_S, REPORT_SETTLE_S, NO_REPORT_S, JOIN_WAIT_S = 15.0, 0.5, 2.0, 15.0
 SUMMARY_S, TICK_S, MAX_MESSAGES_PER_S = 30.0, 0.2, 400
 RADIUS_KINDS = {0, 1, 2, 4, 5, 6}
 
